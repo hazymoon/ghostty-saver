@@ -39,6 +39,9 @@ struct RendererTests {
     /// rather than through Metal.
     @Test("the GPU writes land in shared memory")
     func rendersIntoSharedMemory() throws {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         guard MTLCreateSystemDefaultDevice() != nil else { return }
         prepareShmTracking()
 
@@ -97,6 +100,9 @@ struct RendererTests {
     /// before Metal reads past the end of it.
     @Test("a frame that is too small is rejected")
     func rejectsUndersizedFrame() throws {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         guard MTLCreateSystemDefaultDevice() != nil else { return }
         prepareShmTracking()
 

@@ -89,6 +89,9 @@ struct RendererResizeTests {
     /// into a segment sized for the old resolution must be refused.
     @Test("a stale frame is refused after growing")
     func staleFrameRefusedAfterGrowth() throws {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         guard MTLCreateSystemDefaultDevice() != nil else { return }
         prepareShmTracking()
 

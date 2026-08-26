@@ -14,6 +14,9 @@ struct RenderedFrame {
     let pixels: [UInt8]
 
     static func make(program: ShaderProgram, width: Int, height: Int, time: Float) throws -> RenderedFrame? {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         guard MTLCreateSystemDefaultDevice() != nil else { return nil }
         prepareShmTracking()
 

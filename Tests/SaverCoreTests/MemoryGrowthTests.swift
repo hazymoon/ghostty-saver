@@ -25,6 +25,9 @@ func residentBytes() -> UInt64 {
 struct MemoryGrowthTests {
     @Test("rendering many frames does not grow the process")
     func repeatedRendersDoNotGrow() throws {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         guard MTLCreateSystemDefaultDevice() != nil else { return }
         prepareShmTracking()
 

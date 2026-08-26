@@ -4,6 +4,16 @@ import Testing
 
 @testable import SaverCore
 
+/// Serializes every test that creates shared memory.
+///
+/// The tracking ring is process-wide and assumes one thread, matching the
+/// render loop it exists for. Suites run in parallel, so without this two tests
+/// race the ring's cursor and a name escapes it - which reads as the ring
+/// failing to reclaim rather than as a test colliding with its neighbour.
+/// Recursive so a helper that already holds it can be called from a test that
+/// does too.
+let shmExclusive = NSRecursiveLock()
+
 /// Hands out counters that no other test will reuse, since the shared memory
 /// namespace is per-user and the whole suite runs in one process.
 private let counterSource = ManagedAtomicCounter(start: 100_000)
@@ -64,6 +74,9 @@ struct ShmFrameTests {
 
     @Test("the mapping is page-aligned and large enough")
     func mappingGeometry() throws {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         prepareShmTracking()
         let pageSize = Int(getpagesize())
         // Deliberately not a multiple of the page size.
@@ -87,6 +100,9 @@ struct ShmFrameTests {
 
     @Test("the mapping is writable and reads back")
     func mappingIsWritable() throws {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         prepareShmTracking()
         let frame = try ShmFrame.create(
             name: makeShmName(pid: getpid(), counter: 1002),
@@ -106,6 +122,9 @@ struct ShmFrameTests {
     /// Creation uses O_EXCL so a stale segment is never silently adopted.
     @Test("creating the same name twice fails")
     func duplicateNameFails() throws {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         prepareShmTracking()
         let name = makeShmName(pid: getpid(), counter: 1003)
         let first = try ShmFrame.create(name: name, payloadBytes: 64)
@@ -132,6 +151,9 @@ struct ShmFrameTests {
     /// otherwise a run leaks segments until reboot.
     @Test("segments older than the ring are reclaimed")
     func oldSegmentsAreReclaimed() throws {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         prepareShmTracking()
         defer { unlinkTrackedShm() }
 
@@ -156,6 +178,9 @@ struct ShmFrameTests {
     /// yet, which is a dropped frame rather than a leak.
     @Test("recent segments are left alone")
     func recentSegmentsSurvive() throws {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         prepareShmTracking()
 
         var frames: [ShmFrame] = []
@@ -171,6 +196,9 @@ struct ShmFrameTests {
 
     @Test("unlinkTrackedShm removes what is left")
     func unlinkClearsEverything() throws {
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
         prepareShmTracking()
         let frame = try ShmFrame.create(
             name: makeShmName(pid: getpid(), counter: 3000),

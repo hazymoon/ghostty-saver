@@ -15,6 +15,11 @@ public let shmNameMaxBytes = 31
 // The signal handler touches this, so it lives in a raw C buffer rather than a
 // Swift Array, and prepareShmTracking() allocates it up front so no lazy
 // initialization runs inside the handler.
+//
+// Frames are expected to be created from one thread. The render loop is, and a
+// lock here would have to be taken from the signal handler too, where locking
+// is not safe. Creating frames concurrently races the cursor and lets a name
+// escape the ring.
 
 private let shmSlotCount = 16
 private let shmSlotBytes = 32
