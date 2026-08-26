@@ -10,11 +10,17 @@
 #   release binary, locks the client, samples resident memory while the
 #   screensaver runs, stops it, and puts lock-command back the way it was.
 #
-#   THIS LOCKS THE TMUX CLIENT IT RUNS IN. That client is unusable for the
-#   whole duration, and pressing a key ends the screensaver early. Run it from
-#   a tmux session you can leave alone, or use --no-drive and start the
-#   screensaver yourself in a separate Ghostty window that is not attached to
-#   tmux.
+#   THIS LOCKS A WHOLE TMUX CLIENT. tmux has no per-pane lock: lock-command
+#   takes over the client's tty, which is the production path and the reason
+#   this is a faithful test. The locked client is unusable for the duration,
+#   and pressing a key ends the screensaver early.
+#
+#   --client locks a different client instead, so a second Ghostty window can
+#   be given over to the run while work continues elsewhere. That stays a valid
+#   test of the screensaver, but it is a worse measurement: every Ghostty
+#   window belongs to one process, so working in another window adds allocation
+#   churn to the very number being sampled. For a leak check, prefer stepping
+#   away.
 #
 #   Sampling starts before the lock, so the warmup period is visible in the log
 #   rather than being guessed at.
@@ -25,6 +31,7 @@
 # @arg --duration N  seconds to sample (default 180)
 # @arg --interval N  seconds between samples (default 5)
 # @arg --warmup N    seconds to ignore at the start when judging (default 20)
+# @arg --client NAME lock this client instead of the current one
 # @arg --no-drive    do not touch tmux; sample whatever is already running
 #
 # @exitcode 0 memory is flat
@@ -40,12 +47,14 @@ duration=180
 interval=5
 warmup=20
 drive=1
+client=
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --duration) duration="$2"; shift 2 ;;
         --interval) interval="$2"; shift 2 ;;
         --warmup) warmup="$2"; shift 2 ;;
+        --client) client="$2"; shift 2 ;;
         --no-drive) drive=0; shift ;;
         -h | --help) sed -n '2,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 1 ;;
@@ -59,8 +68,14 @@ if [ -z "$terminal_pid" ]; then
 fi
 
 if [ "$drive" -eq 1 ]; then
-    if [ -z "${TMUX:-}" ]; then
-        echo "not inside tmux; run this from a tmux pane, or pass --no-drive." >&2
+    if [ -z "${TMUX:-}" ] && [ -z "$client" ]; then
+        echo "not inside tmux; run this from a tmux pane, pass --client, or pass --no-drive." >&2
+        echo "clients: $(tmux list-clients -F '#{client_name}' 2> /dev/null | tr '\n' ' ')" >&2
+        exit 1
+    fi
+    if [ -n "$client" ] && ! tmux list-clients -F '#{client_name}' 2> /dev/null | grep -qx "$client"; then
+        echo "no tmux client named $client." >&2
+        echo "clients: $(tmux list-clients -F '#{client_name}' 2> /dev/null | tr '\n' ' ')" >&2
         exit 1
     fi
     if [ ! -x "$binary" ]; then
@@ -102,7 +117,10 @@ if [ "$drive" -eq 1 ]; then
 fi
 
 echo "sampling every ${interval}s for ${duration}s (Ghostty pid $terminal_pid)"
-if [ "$drive" -eq 1 ]; then
+if [ "$drive" -eq 1 ] && [ -n "$client" ]; then
+    echo "locking client $client; pressing a key there ends the run early"
+    echo "note: all Ghostty windows share one process, so working elsewhere adds noise here"
+elif [ "$drive" -eq 1 ]; then
     echo "this tmux client is locked until the run finishes; pressing a key ends it early"
 else
     echo "--no-drive: start the screensaver yourself; this cannot check which build is running"
@@ -112,7 +130,11 @@ echo "# elapsed_seconds	ghostty_rss_kb	saver_rss_kb" > "$samples"
 if [ "$drive" -eq 1 ]; then
     # One sample before the lock, so the log shows the idle baseline.
     echo -e "0\t$(ps -o rss= -p "$terminal_pid" | tr -d ' ')\t" >> "$samples"
-    tmux lock-client
+    if [ -n "$client" ]; then
+        tmux lock-client -t "$client"
+    else
+        tmux lock-client
+    fi
 fi
 
 started_at="$(date +%s)"

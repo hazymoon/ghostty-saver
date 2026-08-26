@@ -133,18 +133,26 @@ It points tmux's `lock-command` at the release binary, locks the client,
 samples resident memory for three minutes, stops the screensaver and puts
 `lock-command` back. It refuses to run against a binary older than the sources.
 
-**It locks the tmux client it runs in.** That client is unusable until the run
-finishes, and a keypress ends the screensaver early - which the script detects
-and reports rather than passing a truncated run. Either run it from a session
-you can leave alone, or drive it yourself:
+**It locks a whole tmux client.** tmux has no per-pane lock: `lock-command`
+takes over the client's tty, which is the production path and the reason this
+is a faithful test. The locked client is unusable until the run finishes, and a
+keypress ends the screensaver early - which the script detects and reports
+rather than passing off a truncated run.
+
+To keep working, give a second Ghostty window over to the run:
 
 ```sh
-# in a Ghostty window that is not attached to tmux
-.build/release/ghostty-saver --stats
-
-# meanwhile, from anywhere
-Scripts/check-memory.sh --no-drive
+tmux list-clients -F '#{client_name}'
+Scripts/check-memory.sh --client /dev/ttys00N
 ```
+
+That is still a valid test of the screensaver, but a worse measurement: every
+Ghostty window belongs to one process, so working in another window adds
+allocation churn to the number being sampled. For a leak check, stepping away
+for three minutes gives a cleaner answer.
+
+`--no-drive` samples without touching tmux, for when the screensaver is being
+started some other way.
 
 The verdict reports the slope with its own standard error and states how small
 a leak the run could have detected, so a `PASS` can be read for what it is: it
