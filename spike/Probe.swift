@@ -44,6 +44,13 @@ private func report(_ fd: Int32, _ text: String) {
     // raw モード中なので改行は CR+LF にする。
     let line = text + "\r\n"
     _ = line.withCString { write(fd, $0, strlen($0)) }
+
+    // 画面はキー入力後に消えてしまうので、リダイレクトされた標準エラーにも残す。
+    // 標準エラーが tty のままなら二重表示になるだけなので出さない。
+    if isatty(STDERR_FILENO) != 1 {
+        let logLine = text + "\n"
+        _ = logLine.withCString { write(STDERR_FILENO, $0, strlen($0)) }
+    }
 }
 
 /// 診断を実行する。呼び出し側が raw モードにしてあることを前提とする。
