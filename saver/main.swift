@@ -228,6 +228,8 @@ var transport = KittySharedMemoryTransport(
 )
 let reader = ResponseReader(fd: TerminalSession.outputFD)
 
+// Only collected with --stats: one Double per frame per series is small, but a
+// screensaver runs for hours and nothing ever reads them otherwise.
 var shmSamples = Samples()
 var renderSamples = Samples()
 var writeSamples = Samples()
@@ -277,7 +279,7 @@ while !stopped {
     } catch {
         fail("\(error)")
     }
-    shmSamples.append(monotonicNow() - shmStart)
+    if options.stats { shmSamples.append(monotonicNow() - shmStart) }
 
     let renderStart = monotonicNow()
     state.update(
@@ -290,12 +292,13 @@ while !stopped {
     } catch {
         fail("\(error)")
     }
-    renderSamples.append(monotonicNow() - renderStart)
+    if options.stats { renderSamples.append(monotonicNow() - renderStart) }
 
     frame.closeMapping()
 
     do {
-        writeSamples.append(try transport.send(frame: frame))
+        let writeDuration = try transport.send(frame: frame)
+        if options.stats { writeSamples.append(writeDuration) }
     } catch {
         fail("\(error)")
     }
@@ -313,7 +316,7 @@ while !stopped {
             report("no reply from the terminal (frame \(frameIndex))")
             exit(1)
         }
-        ackSamples.append(monotonicNow() - ackStart)
+        if options.stats { ackSamples.append(monotonicNow() - ackStart) }
     } else {
         var pfd = pollfd(fd: TerminalSession.outputFD, events: Int16(POLLIN), revents: 0)
         if poll(&pfd, 1, 0) > 0 {

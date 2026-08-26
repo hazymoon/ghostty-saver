@@ -186,56 +186,61 @@ public final class MetalRenderer {
             throw MetalRendererError.textureCreation(bytesPerRow: bytesPerRow, alignment: linearAlignment)
         }
 
-        // mmap returns a page-aligned pointer, which is what bytesNoCopy needs.
-        guard let buffer = device.makeBuffer(
-            bytesNoCopy: frame.base,
-            length: frame.mappedBytes,
-            options: .storageModeShared,
-            deallocator: nil
-        ) else {
-            throw MetalRendererError.bufferCreation
-        }
+        // Every object below is Objective-C, and a screensaver renders for
+        // hours. Without a pool per frame they accumulate for the lifetime of
+        // the process - measured at a few hundred bytes a frame, which is
+        // hundreds of megabytes over a night.
+        try autoreleasepool {
+            guard let buffer = device.makeBuffer(
+                bytesNoCopy: frame.base,
+                length: frame.mappedBytes,
+                options: .storageModeShared,
+                deallocator: nil
+            ) else {
+                throw MetalRendererError.bufferCreation
+            }
 
-        let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: Self.pixelFormat,
-            width: width,
-            height: height,
-            mipmapped: false
-        )
-        textureDescriptor.storageMode = .shared
-        textureDescriptor.usage = [.renderTarget, .shaderRead]
+            let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: Self.pixelFormat,
+                width: width,
+                height: height,
+                mipmapped: false
+            )
+            textureDescriptor.storageMode = .shared
+            textureDescriptor.usage = [.renderTarget, .shaderRead]
 
-        guard let texture = buffer.makeTexture(
-            descriptor: textureDescriptor,
-            offset: 0,
-            bytesPerRow: bytesPerRow
-        ) else {
-            throw MetalRendererError.textureCreation(bytesPerRow: bytesPerRow, alignment: linearAlignment)
-        }
+            guard let texture = buffer.makeTexture(
+                descriptor: textureDescriptor,
+                offset: 0,
+                bytesPerRow: bytesPerRow
+            ) else {
+                throw MetalRendererError.textureCreation(bytesPerRow: bytesPerRow, alignment: linearAlignment)
+            }
 
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = texture
-        pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].storeAction = .store
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = texture
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].storeAction = .store
+            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
-        guard let commandBuffer = queue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
-            throw MetalRendererError.encoderCreation
-        }
+            guard let commandBuffer = queue.makeCommandBuffer(),
+                  let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
+                throw MetalRendererError.encoderCreation
+            }
 
-        encoder.setRenderPipelineState(pipeline)
-        encoder.setFragmentBuffer(uniforms.buffer, offset: 0, index: 1)
-        encoder.setFragmentTexture(channel0, index: 0)
-        encoder.setFragmentSamplerState(channel0Sampler, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-        encoder.endEncoding()
+            encoder.setRenderPipelineState(pipeline)
+            encoder.setFragmentBuffer(uniforms.buffer, offset: 0, index: 1)
+            encoder.setFragmentTexture(channel0, index: 0)
+            encoder.setFragmentSamplerState(channel0Sampler, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encoder.endEncoding()
 
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
+            commandBuffer.commit()
+            commandBuffer.waitUntilCompleted()
 
-        if let error = commandBuffer.error {
-            throw MetalRendererError.commandFailure("\(error)")
+            if let error = commandBuffer.error {
+                throw MetalRendererError.commandFailure("\(error)")
+            }
         }
     }
 }

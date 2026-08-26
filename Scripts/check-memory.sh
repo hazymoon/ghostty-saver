@@ -119,7 +119,9 @@ trap cleanup EXIT INT TERM
 
 if [ "$drive" -eq 1 ]; then
     previous_lock_command="$(tmux show -gv lock-command 2> /dev/null || true)"
-    tmux set -g lock-command "$binary --stats 2> $saver_log"
+    # Let the screensaver time itself out rather than being killed: it only
+    # prints its per-frame breakdown on a normal exit.
+    tmux set -g lock-command "$binary --stats --seconds $(( duration + 3 )) 2> $saver_log"
 fi
 
 echo "sampling every ${interval}s for ${duration}s (Ghostty pid $terminal_pid)"
@@ -172,6 +174,15 @@ while true; do
     printf '%s\t%s\t%s\n' "$elapsed" "$terminal_rss" "$saver_rss" >> "$samples"
     sleep "$interval"
 done
+
+# Wait for the screensaver to reach its own timeout, so the stats it prints on
+# exit are available. cleanup() kills it if it overstays.
+if [ "$drive" -eq 1 ] && [ "$truncated" -eq 0 ]; then
+    for _ in $(seq 20); do
+        pgrep -x ghostty-saver > /dev/null 2>&1 || break
+        sleep 1
+    done
+fi
 
 cleanup
 

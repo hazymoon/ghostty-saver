@@ -128,6 +128,13 @@ public enum TerminalSession {
         if altScreenEntered { sequence += "\u{1b}[?1049l" }
         write(sequence)
 
+        // The reply to the last frame is often still in flight. TCSAFLUSH only
+        // discards what has already arrived, so give it a moment to land first,
+        // otherwise it turns up on the shell prompt as stray text.
+        // poll and read are both async-signal-safe, so this is reachable from
+        // the signal handler.
+        drainBriefly()
+
         if termiosSaved {
             // TCSAFLUSH rather than TCSANOW: the reply to the last frame is
             // usually still sitting unread in the input queue, and anything
@@ -135,6 +142,25 @@ public enum TerminalSession {
             tcsetattr(outputDescriptor, TCSAFLUSH, &originalTermios)
         }
         unlinkTrackedShm()
+    }
+
+    /// Reads and discards for a bounded number of short polls. Deliberately
+    /// counts iterations rather than consulting a clock, to keep the work
+    /// inside a signal handler to calls that are safe there.
+    private static func drainBriefly() {
+        var chunk = [UInt8](repeating: 0, count: 256)
+        var idlePolls = 0
+        for _ in 0..<20 {
+            var pfd = pollfd(fd: outputDescriptor, events: Int16(POLLIN), revents: 0)
+            if poll(&pfd, 1, 10) <= 0 {
+                idlePolls += 1
+                if idlePolls >= 2 { return }
+                continue
+            }
+            idlePolls = 0
+            let n = chunk.withUnsafeMutableBytes { read(outputDescriptor, $0.baseAddress, $0.count) }
+            if n <= 0 { return }
+        }
     }
 
     private static func write(_ text: String) {
