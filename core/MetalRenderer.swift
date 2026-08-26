@@ -70,9 +70,9 @@ public final class MetalRenderer {
 
     public let device: MTLDevice
     /// Width after padding. The texture and the shared memory both use this.
-    public let width: Int
-    public let height: Int
-    public let bytesPerRow: Int
+    public private(set) var width: Int
+    public private(set) var height: Int
+    public private(set) var bytesPerRow: Int
     public var payloadBytes: Int { bytesPerRow * height }
 
     private let queue: MTLCommandQueue
@@ -142,6 +142,14 @@ public final class MetalRenderer {
         } catch {
             throw MetalRendererError.pipelineCreation("\(error)")
         }
+    }
+
+    /// Adopts a new terminal size. The pipeline does not depend on the size,
+    /// so a resize does not mean recompiling the shader.
+    public func resize(width requestedWidth: Int, height newHeight: Int) {
+        width = Self.alignedWidth(requestedWidth, device: device)
+        height = newHeight
+        bytesPerRow = width * 4
     }
 
     /// A 1x1 black texture. Binding it is harmless for shaders that never touch

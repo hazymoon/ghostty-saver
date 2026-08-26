@@ -12,6 +12,16 @@ private var termiosSaved = false
 private var altScreenEntered = false
 private var restored = false
 
+// Set from a signal handler, so it has to be a type the handler may touch.
+private var resizeRequested: sig_atomic_t = 0
+
+/// Raises the resize flag. The SIGWINCH handler calls this, and it is the only
+/// work the handler does - re-measuring the terminal and reallocating buffers
+/// is not safe from inside a handler.
+func markResizeRequested() {
+    resizeRequested = 1
+}
+
 public enum TerminalSession {
     /// Where terminal output goes.
     public static var outputFD: Int32 { outputDescriptor }
@@ -51,7 +61,22 @@ public enum TerminalSession {
         signal(SIGINT, handler)
         signal(SIGTERM, handler)
         signal(SIGHUP, handler)
+
+        installResizeHandler()
         atexit { TerminalSession.restore() }
+    }
+
+    /// Installs the SIGWINCH handler on its own, without the rest of prepare().
+    public static func installResizeHandler() {
+        signal(SIGWINCH, { _ in markResizeRequested() } as @convention(c) (Int32) -> Void)
+    }
+
+    /// Whether the terminal has been resized since this was last asked.
+    /// Clears the flag, so a caller acts on each resize exactly once.
+    public static func takeResizeRequest() -> Bool {
+        guard resizeRequested != 0 else { return false }
+        resizeRequested = 0
+        return true
     }
 
     /// Enters raw mode, configured to return as soon as one byte is available.

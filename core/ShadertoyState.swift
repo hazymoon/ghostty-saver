@@ -13,8 +13,8 @@ import Metal
 public struct ShadertoyState {
     public let uniforms: UniformBuffer
 
-    private let width: Float
-    private let height: Float
+    private var width: Float
+    private var height: Float
     private var previousTime: Float = 0
 
     public init?(device: MTLDevice, width: Int, height: Int) {
@@ -29,6 +29,13 @@ public struct ShadertoyState {
         uniforms.set(self.width, self.height, 1, at: ShadertoyUniformLayout.iResolution)
         uniforms.set(1, 1, 1, at: ShadertoyUniformLayout.iChannelResolution)
         uniforms.set(Int32(0), at: ShadertoyUniformLayout.iCursorVisible)
+    }
+
+    /// Adopts a new render size after the terminal was resized.
+    public mutating func setResolution(width newWidth: Int, height newHeight: Int) {
+        width = Float(newWidth)
+        height = Float(newHeight)
+        uniforms.set(width, height, 1, at: ShadertoyUniformLayout.iResolution)
     }
 
     public mutating func update(time: Float, frame: Int, frameRate: Float) {

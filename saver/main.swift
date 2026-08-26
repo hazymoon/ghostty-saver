@@ -202,7 +202,7 @@ if options.verify {
 let outputIsTTY = TerminalSession.openOutput(sinkPath: nil)
 guard outputIsTTY else { fail("not attached to a terminal (use --verify to check without one)") }
 
-let size: TerminalSize
+var size: TerminalSize
 if let explicit = options.explicitSize {
     size = TerminalSize(pixelWidth: explicit.width, pixelHeight: explicit.height, columns: 0, rows: 0)
 } else {
@@ -223,7 +223,7 @@ TerminalSession.enterRawMode()
 TerminalSession.enterAltScreen()
 TerminalSession.hideCursor()
 
-let transport = KittySharedMemoryTransport(
+var transport = KittySharedMemoryTransport(
     fd: TerminalSession.outputFD,
     width: renderer.width,
     height: renderer.height,
@@ -241,9 +241,31 @@ let startedAt = monotonicNow()
 var frameIndex: UInt64 = 0
 var stopped = false
 
+/// Re-measures the terminal and rebuilds everything that was sized to it.
+/// The pipeline does not depend on the size, so the shader is not recompiled.
+func adoptNewTerminalSize() {
+    guard let updated = try? resolveTerminalSize(fd: TerminalSession.outputFD),
+          updated.hasPixels else { return }
+    guard updated.pixelWidth != size.pixelWidth || updated.pixelHeight != size.pixelHeight else { return }
+
+    size = updated
+    renderer.resize(width: updated.pixelWidth, height: updated.pixelHeight)
+    state.setResolution(width: renderer.width, height: renderer.height)
+    transport = KittySharedMemoryTransport(
+        fd: TerminalSession.outputFD,
+        width: renderer.width,
+        height: renderer.height,
+        quiet: options.quiet
+    )
+    // The stored image is the old size, so drop it rather than leaving a
+    // stale placement behind while the new one is transmitted.
+    try? transport.deleteAll()
+}
+
 while !stopped {
     if let maxFrames = options.maxFrames, frameIndex >= UInt64(maxFrames) { break }
     if let seconds = options.seconds, monotonicNow() - startedAt >= seconds { break }
+    if TerminalSession.takeResizeRequest() { adoptNewTerminalSize() }
 
     let frameStart = monotonicNow()
 
