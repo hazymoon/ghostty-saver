@@ -6,9 +6,11 @@ let package = Package(
     platforms: [.macOS(.v13)],
     targets: [
         .target(name: "CShim", path: "cshim"),
+        // 転送層・端末制御など spike と本体で共有する部分
+        .target(name: "SaverCore", dependencies: ["CShim"], path: "core"),
         .executableTarget(
             name: "spike",
-            dependencies: ["CShim"],
+            dependencies: ["SaverCore"],
             path: "spike"
         ),
     ]

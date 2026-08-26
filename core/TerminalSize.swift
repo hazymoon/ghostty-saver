@@ -2,23 +2,30 @@ import Foundation
 import CShim
 
 /// 端末の実ピクセルサイズとセル数。
-struct TerminalSize {
-    var pixelWidth: Int
-    var pixelHeight: Int
-    var columns: Int
-    var rows: Int
+public struct TerminalSize {
+    public var pixelWidth: Int
+    public var pixelHeight: Int
+    public var columns: Int
+    public var rows: Int
 
-    var hasPixels: Bool { pixelWidth > 0 && pixelHeight > 0 }
+    public var hasPixels: Bool { pixelWidth > 0 && pixelHeight > 0 }
+
+    public init(pixelWidth: Int, pixelHeight: Int, columns: Int, rows: Int) {
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.columns = columns
+        self.rows = rows
+    }
 }
 
-enum TerminalSizeError: Error, CustomStringConvertible {
+public enum TerminalSizeError: Error, CustomStringConvertible {
     case notATTY
     case ioctlFailed(errno: Int32)
     case noPixelSize
     case csi14tTimeout
     case csi14tUnparsable(String)
 
-    var description: String {
+    public var description: String {
         switch self {
         case .notATTY:
             return "標準出力が tty ではない（--size WxH で明示指定してください）"
@@ -35,7 +42,7 @@ enum TerminalSizeError: Error, CustomStringConvertible {
 }
 
 /// TIOCGWINSZ でサイズを取得する。ws_xpixel/ws_ypixel が 0 のことがある。
-func queryWinsize(fd: Int32) throws -> TerminalSize {
+public func queryWinsize(fd: Int32) throws -> TerminalSize {
     var ws = winsize()
     guard gs_winsize(fd, &ws) == 0 else {
         throw TerminalSizeError.ioctlFailed(errno: errno)
@@ -50,7 +57,7 @@ func queryWinsize(fd: Int32) throws -> TerminalSize {
 
 /// `CSI 14 t` を送り `CSI 4 ; height ; width t` の応答を読む。
 /// 呼び出し側が raw モードにしてあることを前提とする。
-func queryCSI14t(fd: Int32, timeout: TimeInterval = 0.5) throws -> (width: Int, height: Int) {
+public func queryCSI14t(fd: Int32, timeout: TimeInterval = 0.5) throws -> (width: Int, height: Int) {
     let query = "\u{1b}[14t"
     _ = query.withCString { write(fd, $0, strlen($0)) }
 
@@ -86,7 +93,7 @@ func queryCSI14t(fd: Int32, timeout: TimeInterval = 0.5) throws -> (width: Int, 
 
 /// TIOCGWINSZ を第一手段、CSI 14 t をフォールバックとしてピクセルサイズを決める。
 /// CSI 14 t を使う場合だけ一時的に raw モードへ落とす。
-func resolveTerminalSize(fd: Int32) throws -> TerminalSize {
+public func resolveTerminalSize(fd: Int32) throws -> TerminalSize {
     guard isatty(fd) == 1 else { throw TerminalSizeError.notATTY }
 
     var size = try queryWinsize(fd: fd)

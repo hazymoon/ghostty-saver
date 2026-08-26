@@ -3,7 +3,7 @@ import CShim
 
 /// macOS の POSIX shm 名は先頭 '/' を含めて 31 バイトまで（PSHMNAMLEN）。
 /// Linux（NAME_MAX 相当）より厳しいので、名前は必ずこの範囲に収める。
-let shmNameMaxBytes = 31
+public let shmNameMaxBytes = 31
 
 // MARK: - 未回収 shm の追跡
 
@@ -20,7 +20,7 @@ private var shmSlots: UnsafeMutablePointer<CChar>?
 private var shmSlotCursor = 0
 
 /// シグナルハンドラを登録するより前に必ず呼ぶ。
-func prepareShmTracking() {
+public func prepareShmTracking() {
     guard shmSlots == nil else { return }
     let total = shmSlotCount * shmSlotBytes
     let p = UnsafeMutablePointer<CChar>.allocate(capacity: total)
@@ -29,7 +29,7 @@ func prepareShmTracking() {
 }
 
 /// 追跡中の shm を全て unlink する。既に端末が unlink 済みなら ENOENT で無害。
-func unlinkTrackedShm() {
+public func unlinkTrackedShm() {
     guard let slots = shmSlots else { return }
     for i in 0..<shmSlotCount {
         let p = slots + i * shmSlotBytes
@@ -51,13 +51,13 @@ private func trackShm(_ name: UnsafePointer<CChar>) {
 
 // MARK: - shm フレーム
 
-enum ShmFrameError: Error, CustomStringConvertible {
+public enum ShmFrameError: Error, CustomStringConvertible {
     case nameTooLong(String)
     case openFailed(name: String, errno: Int32)
     case truncateFailed(errno: Int32)
     case mapFailed(errno: Int32)
 
-    var description: String {
+    public var description: String {
         switch self {
         case .nameTooLong(let n):
             return "shm 名が \(shmNameMaxBytes) バイトを超えた: \(n)"
@@ -73,17 +73,17 @@ enum ShmFrameError: Error, CustomStringConvertible {
 
 /// 1 フレーム分の共有メモリ領域。
 /// 端末が読み終えると端末側が shm_unlink するため、フレームごとに作り直す。
-struct ShmFrame {
-    let name: String
-    let fd: Int32
-    let base: UnsafeMutableRawPointer
+public struct ShmFrame {
+    public let name: String
+    public let fd: Int32
+    public let base: UnsafeMutableRawPointer
     /// mmap した長さ（ページサイズの倍数）
-    let mappedBytes: Int
+    public let mappedBytes: Int
     /// 画像として意味のある長さ（width * height * 4）
-    let payloadBytes: Int
+    public let payloadBytes: Int
 
     /// 名前を指定して新規作成する。ftruncate はページ境界に切り上げる。
-    static func create(name: String, payloadBytes: Int) throws -> ShmFrame {
+    public static func create(name: String, payloadBytes: Int) throws -> ShmFrame {
         guard name.utf8.count <= shmNameMaxBytes else {
             throw ShmFrameError.nameTooLong(name)
         }
@@ -125,7 +125,7 @@ struct ShmFrame {
     }
 
     /// マップと fd を閉じる。shm_unlink はしない（端末が読む前に消さないため）。
-    func closeMapping() {
+    public func closeMapping() {
         munmap(base, mappedBytes)
         close(fd)
     }
@@ -133,6 +133,6 @@ struct ShmFrame {
 
 /// shm 名を生成する。31 バイト制限に収めるため pid とカウンタを base36 で詰める。
 /// 例: "/gs1n2p.5f"
-func makeShmName(pid: Int32, counter: UInt64) -> String {
+public func makeShmName(pid: Int32, counter: UInt64) -> String {
     "/gs" + String(UInt32(bitPattern: pid), radix: 36) + "." + String(counter, radix: 36)
 }

@@ -1,5 +1,5 @@
 import Foundation
-import CShim
+import SaverCore
 
 // 応答が来ない原因を切り分けるための診断モード。
 // KGP そのものが届いていないのか、t=s（共有メモリ）だけが失敗しているのかを分ける。

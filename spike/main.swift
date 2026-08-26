@@ -1,5 +1,5 @@
 import Foundation
-import CShim
+import SaverCore
 
 // 段階1: 転送スパイク。
 // Metal を使わず CPU で作ったグラデーションを kitty graphics protocol の

@@ -1,7 +1,7 @@
 import Foundation
 
 /// 端末から返ってきたもの。
-enum TerminalEvent {
+public enum TerminalEvent {
     /// APC 応答（kitty graphics protocol の `ESC _ G ... ESC \`）の中身
     case response(String)
     /// APC 以外のバイト。スパイクではキー入力とみなして終了に使う。
@@ -11,7 +11,7 @@ enum TerminalEvent {
 }
 
 /// tty からの応答を APC 単位で切り出す。raw モード前提。
-final class ResponseReader {
+public final class ResponseReader {
     private let fd: Int32
     private var state: State = .idle
     private var apcBuffer: [UInt8] = []
@@ -25,12 +25,12 @@ final class ResponseReader {
         case inAPCSawEscape
     }
 
-    init(fd: Int32) {
+    public init(fd: Int32) {
         self.fd = fd
     }
 
     /// APC 応答が 1 件揃うか、APC 以外のバイトを見るか、期限切れになるまで待つ。
-    func next(timeout: TimeInterval) -> TerminalEvent {
+    public func next(timeout: TimeInterval) -> TerminalEvent {
         let deadline = monotonicNow() + timeout
 
         while true {
