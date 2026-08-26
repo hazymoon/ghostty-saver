@@ -76,6 +76,9 @@ public final class MetalRenderer {
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let linearAlignment: Int
+    /// Ghostty では端末画像がバインドされる位置。本プログラムでは 1x1 の黒を渡す。
+    private let channel0: MTLTexture
+    private let channel0Sampler: MTLSamplerState
 
     /// バッファ由来の linear texture は `bytesPerRow` がデバイスの要求する境界に
     /// 乗っていないと**アサートで即死**する（nil が返るのではない）。
@@ -120,6 +123,12 @@ public final class MetalRenderer {
             throw MetalRendererError.missingFunction(fragmentFunctionName)
         }
 
+        self.channel0 = try Self.makeBlackTexture(device: device)
+        guard let sampler = device.makeSamplerState(descriptor: MTLSamplerDescriptor()) else {
+            throw MetalRendererError.textureCreation(bytesPerRow: 0, alignment: 0)
+        }
+        self.channel0Sampler = sampler
+
         let descriptor = MTLRenderPipelineDescriptor()
         descriptor.vertexFunction = vertexFunction
         descriptor.fragmentFunction = fragmentFunction
@@ -131,14 +140,31 @@ public final class MetalRenderer {
         }
     }
 
+    /// 1x1 の黒。iChannel0 を使わないシェーダでもバインドは害にならない。
+    private static func makeBlackTexture(device: MTLDevice) throws -> MTLTexture {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm, width: 1, height: 1, mipmapped: false
+        )
+        descriptor.usage = .shaderRead
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            throw MetalRendererError.textureCreation(bytesPerRow: 4, alignment: 0)
+        }
+        var black: UInt32 = 0xFF00_0000
+        texture.replace(
+            region: MTLRegionMake2D(0, 0, 1, 1),
+            mipmapLevel: 0,
+            withBytes: &black,
+            bytesPerRow: 4
+        )
+        return texture
+    }
+
     /// 共有メモリを直接レンダーターゲットにして 1 フレーム描く。
     /// GPU の完了を待ってから返るので、戻った時点で共有メモリの中身は確定している。
     ///
-    /// - Parameter bindFragmentArguments: フラグメントシェーダへ uniform を渡すための差し込み口。
-    public func render(
-        into frame: ShmFrame,
-        bindFragmentArguments: (MTLRenderCommandEncoder) -> Void
-    ) throws {
+    /// uniform は spirv-cross が binding 1 に置くので buffer(1) に束ねる
+    /// （Ghostty も MSL_ENABLE_DECORATION_BINDING で同じ位置に置いている）。
+    public func render(into frame: ShmFrame, uniforms: UniformBuffer) throws {
         guard frame.mappedBytes >= payloadBytes else {
             throw MetalRendererError.frameTooSmall(needed: payloadBytes, actual: frame.mappedBytes)
         }
@@ -185,7 +211,9 @@ public final class MetalRenderer {
         }
 
         encoder.setRenderPipelineState(pipeline)
-        bindFragmentArguments(encoder)
+        encoder.setFragmentBuffer(uniforms.buffer, offset: 0, index: 1)
+        encoder.setFragmentTexture(channel0, index: 0)
+        encoder.setFragmentSamplerState(channel0Sampler, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
 

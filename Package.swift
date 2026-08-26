@@ -6,6 +6,8 @@ let package = Package(
     platforms: [.macOS(.v13)],
     targets: [
         .target(name: "CShim", path: "cshim"),
+        // Scripts/build-shaders.sh が shaders/*.glsl から生成する MSL
+        .target(name: "GeneratedShaders", path: "Generated"),
         // 転送層・端末制御など spike と本体で共有する部分
         .target(name: "SaverCore", dependencies: ["CShim"], path: "core"),
         .executableTarget(
@@ -15,7 +17,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "ghostty-saver",
-            dependencies: ["SaverCore"],
+            dependencies: ["SaverCore", "GeneratedShaders"],
             path: "saver"
         ),
     ]

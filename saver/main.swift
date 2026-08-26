@@ -1,38 +1,14 @@
 import Foundation
+import GeneratedShaders
 import Metal
 import SaverCore
 
-// 段階2: Metal オフスクリーン。
 // 共有メモリ上に直接レンダーターゲットを置き、GPU の描画結果をそのまま
-// kitty graphics protocol で送る。シェーダは段階2b で GLSL から生成したものに
-// 差し替わるため、ここでは繋ぎのグラデーションを埋め込んでいる。
-
-// MARK: - 繋ぎのシェーダ
-
-/// 段階2b で `shaders/*.glsl` から生成した MSL に置き換わる。
-let placeholderFragmentSource = """
-struct SaverUniforms {
-    float2 resolution;
-    float time;
-    int frame;
-};
-
-fragment float4 saver_fragment(
-    SaverVertexOut in [[stage_in]],
-    constant SaverUniforms &uniforms [[buffer(0)]]
-) {
-    float2 uv = in.position.xy / uniforms.resolution;
-    float pulse = 0.5 + 0.5 * sin(uniforms.time * 2.0);
-    return float4(uv.x, uv.y, pulse, 1.0);
-}
-"""
-
-/// MSL 側の `SaverUniforms` と同じレイアウト（float2 が 0、float が 8、int が 12）。
-struct SaverUniforms {
-    var resolution: SIMD2<Float>
-    var time: Float
-    var frame: Int32
-}
+// kitty graphics protocol で送る。
+//
+// シェーダは shaders/*.glsl（Shadertoy 形式）を Scripts/build-shaders.sh が
+// MSL に変換したものを使う。uniform は Ghostty の shadertoy_prefix.glsl と
+// 同じ宣言なので、同じ .glsl を Ghostty の custom-shader に置いても動く。
 
 // MARK: - オプション
 
@@ -42,13 +18,17 @@ struct Options {
     var maxFrames: Int?
     var targetFPS: Double = 60
     var quiet: QuietLevel = .verbose
+    var shaderName: String?
     var verify = false
     var stats = false
 }
 
+let availableShaders = GeneratedShaders.all.map(\.name).joined(separator: ", ")
+
 let usage = """
 使い方: ghostty-saver [オプション]
 
+  --shader NAME     使うシェーダ（既定は最初のもの）。利用可能: \(availableShaders)
   --size WxH        端末に問い合わせず解像度を明示する
   --seconds N       N 秒で終了する（既定はキー入力があるまで動き続ける）
   --frames N        N フレームで終了する
@@ -77,6 +57,8 @@ func parseOptions() -> Options {
         case "-h", "--help":
             print(usage)
             exit(0)
+        case "--shader":
+            options.shaderName = nextValue(argument)
         case "--size":
             let value = nextValue(argument)
             let parts = value.lowercased().split(separator: "x")
@@ -115,41 +97,57 @@ func report(_ text: String) {
     FileHandle.standardError.write(Data((text + "\n").utf8))
 }
 
-// MARK: - 検証モード
+func selectShader(named name: String?) -> ShaderProgram {
+    guard let name else {
+        guard let first = GeneratedShaders.all.first else {
+            fail("シェーダが 1 本も生成されていません。Scripts/build-shaders.sh を実行してください。")
+        }
+        return first
+    }
+    guard let program = GeneratedShaders.all.first(where: { $0.name == name }) else {
+        fail("シェーダ \(name) がありません。利用可能: \(availableShaders)")
+    }
+    return program
+}
 
-/// 端末を使わず、共有メモリに載った描画結果を直接読んで確認する。
-func runVerify(width: Int, height: Int) -> Never {
-    prepareShmTracking()
-    let renderer: MetalRenderer
+func makeRenderer(program: ShaderProgram, width: Int, height: Int) -> MetalRenderer {
     do {
-        renderer = try MetalRenderer(
+        return try MetalRenderer(
             width: width,
             height: height,
-            fragmentSource: placeholderFragmentSource,
-            fragmentFunctionName: "saver_fragment"
+            fragmentSource: program.source,
+            fragmentFunctionName: program.entryPoint
         )
     } catch {
         fail("\(error)")
     }
+}
+
+// MARK: - 検証モード
+
+/// 端末を使わず、共有メモリに載った描画結果を直接読んで確認する。
+func runVerify(program: ShaderProgram, width: Int, height: Int) -> Never {
+    prepareShmTracking()
+    let renderer = makeRenderer(program: program, width: width, height: height)
+
+    guard var state = ShadertoyState(device: renderer.device, width: renderer.width, height: renderer.height) else {
+        fail("uniform バッファを確保できません")
+    }
+    state.update(time: 0, frame: 0, frameRate: 0)
 
     report("デバイス          : \(renderer.device.name)")
+    report("シェーダ          : \(program.name) (エントリポイント \(program.entryPoint))")
     report("要求解像度        : \(width) x \(height)")
     report("実解像度          : \(renderer.width) x \(renderer.height) "
         + "(bytesPerRow=\(renderer.bytesPerRow), linear texture の境界に切り上げ)")
+    report("uniform           : \(ShadertoyUniformLayout.size) バイト")
 
     do {
         let frame = try ShmFrame.create(
             name: makeShmName(pid: getpid(), counter: 0),
             payloadBytes: renderer.payloadBytes
         )
-        var uniforms = SaverUniforms(
-            resolution: SIMD2<Float>(Float(renderer.width), Float(renderer.height)),
-            time: 0,
-            frame: 0
-        )
-        try renderer.render(into: frame) { encoder in
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<SaverUniforms>.stride, index: 0)
-        }
+        try renderer.render(into: frame, uniforms: state.uniforms)
 
         // 共有メモリ側を直接読む。GPU の書き込みがそのまま載っているはず。
         let pixels = frame.base.assumingMemoryBound(to: UInt8.self)
@@ -172,10 +170,11 @@ func runVerify(width: Int, height: Int) -> Never {
 // MARK: - 起動
 
 let options = parseOptions()
+let program = selectShader(named: options.shaderName)
 
 if options.verify {
     let size = options.explicitSize ?? (width: 1920, height: 1080)
-    runVerify(width: size.width, height: size.height)
+    runVerify(program: program, width: size.width, height: size.height)
 }
 
 let outputIsTTY = TerminalSession.openOutput(sinkPath: nil)
@@ -192,16 +191,9 @@ if let explicit = options.explicitSize {
     }
 }
 
-let renderer: MetalRenderer
-do {
-    renderer = try MetalRenderer(
-        width: size.pixelWidth,
-        height: size.pixelHeight,
-        fragmentSource: placeholderFragmentSource,
-        fragmentFunctionName: "saver_fragment"
-    )
-} catch {
-    fail("\(error)")
+let renderer = makeRenderer(program: program, width: size.pixelWidth, height: size.pixelHeight)
+guard var state = ShadertoyState(device: renderer.device, width: renderer.width, height: renderer.height) else {
+    fail("uniform バッファを確保できません")
 }
 
 TerminalSession.prepare()
@@ -217,8 +209,8 @@ let transport = KittySharedMemoryTransport(
 )
 let reader = ResponseReader(fd: TerminalSession.outputFD)
 
-var renderSamples = Samples()
 var shmSamples = Samples()
+var renderSamples = Samples()
 var writeSamples = Samples()
 var ackSamples = Samples()
 
@@ -247,15 +239,13 @@ while !stopped {
     shmSamples.append(monotonicNow() - shmStart)
 
     let renderStart = monotonicNow()
-    var uniforms = SaverUniforms(
-        resolution: SIMD2<Float>(Float(renderer.width), Float(renderer.height)),
+    state.update(
         time: Float(frameStart - startedAt),
-        frame: Int32(truncatingIfNeeded: frameIndex)
+        frame: Int(frameIndex),
+        frameRate: Float(options.targetFPS)
     )
     do {
-        try renderer.render(into: frame) { encoder in
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<SaverUniforms>.stride, index: 0)
-        }
+        try renderer.render(into: frame, uniforms: state.uniforms)
     } catch {
         fail("\(error)")
     }
@@ -303,8 +293,9 @@ TerminalSession.restore()
 
 if options.stats {
     report("")
-    report("=== 段階2 Metal オフスクリーン ===")
+    report("=== ghostty-saver ===")
     report("デバイス          : \(renderer.device.name)")
+    report("シェーダ          : \(program.name)")
     report("解像度            : \(renderer.width) x \(renderer.height) px "
         + "(端末は \(size.pixelWidth) x \(size.pixelHeight))")
     report("1 フレーム        : \(String(format: "%.2f", Double(renderer.payloadBytes) / 1_048_576)) MiB")
