@@ -117,23 +117,75 @@ struct UniformTests {
 
 @Suite("sample statistics")
 struct SamplesTests {
+    /// One bucket of the histogram, which is what percentiles are accurate to.
+    private let tolerance = 0.000_05
+
     @Test("an empty series reports zeroes instead of dividing by zero")
     func emptySeries() {
         let samples = Samples()
         #expect(samples.count == 0)
         #expect(samples.mean == 0)
         #expect(samples.percentile(0.5) == 0)
+        #expect(samples.maximum == 0)
     }
 
-    @Test("mean and percentiles come from the sorted series")
-    func meanAndPercentiles() {
+    @Test("count, sum, mean and maximum are exact")
+    func exactAggregates() {
         var samples = Samples()
         for value in [0.005, 0.001, 0.003, 0.002, 0.004] { samples.append(value) }
 
         #expect(samples.count == 5)
+        #expect(abs(samples.sum - 0.015) < 1e-9)
         #expect(abs(samples.mean - 0.003) < 1e-9)
-        #expect(samples.percentile(0.5) == 0.003)
+        #expect(samples.maximum == 0.005)
+    }
+
+    @Test("percentiles land within a bucket of the true value")
+    func percentilesAreCloseEnough() {
+        var samples = Samples()
+        for value in [0.005, 0.001, 0.003, 0.002, 0.004] { samples.append(value) }
+
+        #expect(abs(samples.percentile(0.5) - 0.003) <= tolerance)
+        #expect(abs(samples.percentile(0) - 0.001) <= tolerance)
         #expect(samples.percentile(1.0) == 0.005)
-        #expect(samples.percentile(0) == 0.001)
+    }
+
+    @Test("percentiles stay ordered across a wide spread")
+    func percentilesAreOrdered() {
+        var samples = Samples()
+        for index in 0..<1000 { samples.append(Double(index) * 0.000_1) }
+
+        #expect(samples.percentile(0) <= samples.percentile(0.5))
+        #expect(samples.percentile(0.5) <= samples.percentile(0.95))
+        #expect(samples.percentile(0.95) <= samples.percentile(1.0))
+        #expect(abs(samples.percentile(0.5) - 0.05) <= tolerance)
+    }
+
+    /// A stall longer than the histogram covers must not be lost or reported
+    /// as though it fell in the last bucket.
+    @Test("a value past the histogram range is still reported as the maximum")
+    func outOfRangeValue() {
+        var samples = Samples()
+        for _ in 0..<99 { samples.append(0.001) }
+        samples.append(5.0)
+
+        #expect(samples.maximum == 5.0)
+        #expect(samples.count == 100)
+        #expect(abs(samples.percentile(0.5) - 0.001) <= tolerance)
+        #expect(samples.summaryMilliseconds().contains("5000.000"))
+    }
+
+    /// The point of the histogram: the series does not get bigger as frames go
+    /// by. A screensaver appends one of these per frame for hours, and the
+    /// previous design kept every sample.
+    @Test("storage does not grow with the number of samples")
+    func storageIsBounded() {
+        var samples = Samples()
+        let initialStorage = samples.histogramStorageCount
+
+        for index in 0..<1_000_000 { samples.append(Double(index % 500) * 0.000_1) }
+
+        #expect(samples.count == 1_000_000)
+        #expect(samples.histogramStorageCount == initialStorage)
     }
 }

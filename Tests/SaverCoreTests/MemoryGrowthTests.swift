@@ -51,19 +51,30 @@ struct MemoryGrowthTests {
             }
         }
 
+        // Resident size is process-wide and other suites allocate alongside
+        // this one, so a single window can pick up someone else's spike. Three
+        // windows and the median keeps that from failing the test while still
+        // catching growth that happens every frame.
+        let framesPerWindow = 2000
+        var counter = uniqueCounters(1)[0] * 100_000
+        var perFrame: [Double] = []
+
         // Let one-time allocations settle before measuring.
-        let base = uniqueCounters(1)[0] * 1000
-        try renderFrames(60, from: base)
-        let before = residentBytes()
+        try renderFrames(200, from: counter)
+        counter += 1000
 
-        try renderFrames(5000, from: base + 100)
-        let after = residentBytes()
+        for _ in 0..<3 {
+            let before = residentBytes()
+            try renderFrames(framesPerWindow, from: counter)
+            let after = residentBytes()
+            counter += UInt64(framesPerWindow) + 1000
+            perFrame.append(Double(after &- before) / Double(framesPerWindow))
+        }
 
-        let growthMB = Double(after &- before) / 1_048_576
-        let perFrameBytes = Double(after &- before) / 5000
-
-        let detail = "5000 frames grew the process by \(String(format: "%.2f", growthMB)) MiB "
-            + "(\(String(format: "%.0f", perFrameBytes)) bytes per frame)"
-        #expect(perFrameBytes < 64, "\(detail)")
+        let median = perFrame.sorted()[1]
+        let detail = "growth per frame across three windows: "
+            + perFrame.map { String(format: "%.0f", $0) }.joined(separator: ", ")
+            + " bytes (median \(String(format: "%.0f", median)))"
+        #expect(median < 64, "\(detail)")
     }
 }
