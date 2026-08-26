@@ -19,6 +19,8 @@ struct Options {
     var ackTimeout: Double = 2.0
     /// 最終フレームを表示したままキー入力を待つ（表示確認用）
     var hold = false
+    /// 計測せず、応答が来ない原因を切り分ける診断だけを行う
+    var probe = false
 }
 
 let usage = """
@@ -31,6 +33,7 @@ let usage = """
   --hold            計測後、キーを押すまで最終フレームを表示したままにする
   --quiet-level N   0=応答あり（既定・端末の消化速度で律速）, 1=エラーのみ, 2=応答なし
   --sink PATH       tty ではなく指定パスへ書く（write(2) 以外のコストだけを測る）
+  --probe           計測せず診断だけ行う（KGP が届くか / t=d と t=s のどちらが落ちるか）
   --no-alt-screen   代替画面へ切り替えない
   -h, --help        この使い方を表示する
 
@@ -80,6 +83,9 @@ func parseOptions() -> Options {
             options.quiet = QuietLevel(rawValue: value) ?? .verbose
         case "--sink":
             options.sinkPath = nextValue(argument)
+        case "--probe":
+            options.probe = true
+            options.useAltScreen = false
         case "--no-alt-screen":
             options.useAltScreen = false
         default:
@@ -191,6 +197,13 @@ if outputIsTTY {
         gAltScreenEntered = true
     }
     _ = "\u{1b}[?25l".withCString { write(gOutputFD, $0, strlen($0)) }
+}
+
+if options.probe {
+    guard outputIsTTY else { fail("--probe は tty が必要です") }
+    runProbe(fd: gOutputFD, size: size)
+    restoreTerminal()
+    exit(0)
 }
 
 // MARK: - 計測ループ
