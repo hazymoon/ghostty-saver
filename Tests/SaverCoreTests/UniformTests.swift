@@ -195,6 +195,21 @@ struct SamplesTests {
         #expect(samples.percentile(0.5) <= samples.mean)
     }
 
+    /// A steady render loop drops nearly every sample into one bucket. When
+    /// that cluster sits in the lower half of the bucket, the bucket's midpoint
+    /// is larger than anything actually measured, and the summary line reads
+    /// "p50 0.993  max 0.984".
+    @Test("a reported percentile never exceeds the maximum")
+    func percentilesNeverExceedTheMaximum() {
+        var samples = Samples()
+        // Exactly a bucket's lower edge, so the midpoint sits above every sample.
+        let bucketLowerEdge = 0.000_001 * pow(1.02, 348.0)
+        for _ in 0..<100 { samples.append(bucketLowerEdge) }
+
+        #expect(samples.percentile(0.5) <= samples.maximum)
+        #expect(samples.percentile(0.95) <= samples.maximum)
+    }
+
     /// The point of the histogram: the series does not get bigger as frames go
     /// by. A screensaver appends one of these per frame for hours, and the
     /// previous design kept every sample.

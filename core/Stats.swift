@@ -62,8 +62,12 @@ public struct Samples {
             seen += bucket
             if seen > target {
                 // Geometric midpoint, since the bucket is a ratio not a span.
+                // Clamped to the maximum: a cluster sitting in the lower half
+                // of its bucket would otherwise report a percentile above
+                // anything actually measured, and the summary line would read
+                // "p50 0.993  max 0.984".
                 let lower = Self.smallestSeconds * pow(Self.growthPerBucket, Double(index))
-                return lower * sqrt(Self.growthPerBucket)
+                return min(lower * sqrt(Self.growthPerBucket), maximum)
             }
         }
         // Everything past the histogram's range; the maximum is the only exact
