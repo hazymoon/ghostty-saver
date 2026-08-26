@@ -1,8 +1,10 @@
 import Foundation
 
-// 端末の状態変更と復帰をまとめる。
-// 復帰はシグナルハンドラからも呼ばれるため、状態はファイルスコープのグローバルに置く。
-// prepare() で先に触っておき、遅延初期化がハンドラ内で走らないようにする。
+// Owns every change made to the terminal and the corresponding restore.
+//
+// restore() is reachable from a signal handler, so the state lives in
+// file-scope globals that prepare() touches up front, keeping lazy
+// initialization out of the handler.
 
 private var outputDescriptor: Int32 = STDOUT_FILENO
 private var originalTermios = termios()
@@ -11,11 +13,12 @@ private var altScreenEntered = false
 private var restored = false
 
 public enum TerminalSession {
-    /// 端末への書き込み先。
+    /// Where terminal output goes.
     public static var outputFD: Int32 { outputDescriptor }
 
-    /// 出力先を決めて開く。tty かどうかを返す。
-    /// sinkPath があればそこへ、無ければ標準出力、リダイレクトされていれば /dev/tty。
+    /// Picks and opens the output. Returns whether it is a tty.
+    /// Prefers sinkPath, then standard output, then /dev/tty when standard
+    /// output has been redirected.
     @discardableResult
     public static func openOutput(sinkPath: String?) -> Bool {
         if let sinkPath {
@@ -30,10 +33,11 @@ public enum TerminalSession {
         return isatty(outputDescriptor) == 1
     }
 
-    /// shm 追跡の確保とシグナルハンドラ・atexit の登録。端末を触る前に呼ぶ。
+    /// Allocates shared memory tracking and installs signal and atexit
+    /// handlers. Call before touching the terminal.
     public static func prepare() {
         prepareShmTracking()
-        // グローバルを先に触って初期化を済ませておく。
+        // Force the globals to initialize now rather than inside a handler.
         _ = outputDescriptor
         _ = termiosSaved
         _ = altScreenEntered
@@ -50,7 +54,7 @@ public enum TerminalSession {
         atexit { TerminalSession.restore() }
     }
 
-    /// raw モードにする。1 バイト読めたら返る設定。
+    /// Enters raw mode, configured to return as soon as one byte is available.
     public static func enterRawMode() {
         var raw = termios()
         guard tcgetattr(outputDescriptor, &raw) == 0 else { return }
@@ -71,8 +75,8 @@ public enum TerminalSession {
         write("\u{1b}[?25l")
     }
 
-    /// 画像削除 → カーソル表示 → 代替画面終了 → termios 復帰 → shm 回収。
-    /// 何度呼んでも 1 度しか実行しない。
+    /// Deletes images, shows the cursor, leaves the alternate screen, restores
+    /// termios and reclaims shared memory. Idempotent.
     public static func restore() {
         if restored { return }
         restored = true

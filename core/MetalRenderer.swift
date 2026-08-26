@@ -16,31 +16,32 @@ public enum MetalRendererError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .noDevice:
-            return "Metal デバイスが見つかりません"
+            return "no Metal device available"
         case .noCommandQueue:
-            return "MTLCommandQueue を作れません"
+            return "could not create an MTLCommandQueue"
         case .libraryCompilation(let message):
-            return "シェーダのコンパイルに失敗しました: \(message)"
+            return "shader compilation failed: \(message)"
         case .missingFunction(let name):
-            return "シェーダ関数 \(name) が見つかりません"
+            return "shader function \(name) not found"
         case .pipelineCreation(let message):
-            return "レンダーパイプラインを作れません: \(message)"
+            return "could not create the render pipeline: \(message)"
         case .bufferCreation:
-            return "共有メモリを MTLBuffer として包めません"
+            return "could not wrap the shared memory in an MTLBuffer"
         case .textureCreation(let bytesPerRow, let alignment):
-            return "テクスチャを作れません (bytesPerRow=\(bytesPerRow) が \(alignment) バイト境界にありません)"
+            return "could not create the texture (bytesPerRow=\(bytesPerRow) is not \(alignment)-byte aligned)"
         case .encoderCreation:
-            return "レンダーコマンドエンコーダを作れません"
+            return "could not create a render command encoder"
         case .commandFailure(let message):
-            return "GPU コマンドが失敗しました: \(message)"
+            return "GPU command failed: \(message)"
         case .frameTooSmall(let needed, let actual):
-            return "共有メモリが小さすぎます (必要 \(needed) バイト、実際 \(actual) バイト)"
+            return "shared memory is too small (need \(needed) bytes, have \(actual))"
         }
     }
 }
 
-/// 画面全体を覆う三角形1枚を描く頂点シェーダ。ジオメトリは持たない。
-/// フラグメントシェーダ側と結合して 1 つの MSL ソースとしてコンパイルする。
+/// Vertex shader that covers the screen with a single triangle. There is no
+/// geometry to speak of. It is concatenated with the fragment shader and
+/// compiled as one MSL source.
 public let saverVertexSource = """
 #include <metal_stdlib>
 using namespace metal;
@@ -50,7 +51,8 @@ struct SaverVertexOut {
 };
 
 vertex SaverVertexOut saver_vertex(uint vertexID [[vertex_id]]) {
-    // vertexID 0,1,2 -> (0,0), (2,0), (0,2) を NDC に伸ばして画面全体を覆う
+    // vertexID 0,1,2 -> (0,0), (2,0), (0,2), stretched into NDC so the triangle
+    // covers the whole viewport.
     float2 uv = float2((vertexID << 1) & 2, vertexID & 2);
     SaverVertexOut out;
     out.position = float4(uv * 2.0 - 1.0, 0.0, 1.0);
@@ -58,16 +60,16 @@ vertex SaverVertexOut saver_vertex(uint vertexID [[vertex_id]]) {
 }
 """
 
-/// 共有メモリ上のレンダーターゲットへ直接描く Metal レンダラ。
+/// Renders straight into a shared memory render target.
 ///
-/// `shm_open` した領域を `makeBuffer(bytesNoCopy:)` で包み、そこから
-/// `makeTexture(descriptor:offset:bytesPerRow:)` でテクスチャを作るので、
-/// GPU の描画結果がそのまま共有メモリに載り readback のコピーが発生しない。
+/// The region returned by shm_open is wrapped with makeBuffer(bytesNoCopy:) and
+/// turned into a texture with makeTexture(descriptor:offset:bytesPerRow:), so
+/// what the GPU draws lands in shared memory with no readback copy.
 public final class MetalRenderer {
     public static let pixelFormat: MTLPixelFormat = .rgba8Unorm
 
     public let device: MTLDevice
-    /// パディング後の幅。テクスチャと共有メモリはこの幅で扱う。
+    /// Width after padding. The texture and the shared memory both use this.
     public let width: Int
     public let height: Int
     public let bytesPerRow: Int
@@ -76,13 +78,14 @@ public final class MetalRenderer {
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let linearAlignment: Int
-    /// Ghostty では端末画像がバインドされる位置。本プログラムでは 1x1 の黒を渡す。
+    /// Where Ghostty binds the terminal's own image. Here it is a 1x1 black
+    /// texture.
     private let channel0: MTLTexture
     private let channel0Sampler: MTLSamplerState
 
-    /// バッファ由来の linear texture は `bytesPerRow` がデバイスの要求する境界に
-    /// 乗っていないと**アサートで即死**する（nil が返るのではない）。
-    /// 幅をその境界に切り上げた値を返す。
+    /// A linear texture backed by a buffer **traps** when bytesPerRow does not
+    /// meet the device's alignment - it does not return nil. This rounds the
+    /// width up to the nearest value that satisfies it.
     public static func alignedWidth(_ width: Int, device: MTLDevice) -> Int {
         let alignment = max(4, device.minimumLinearTextureAlignment(for: pixelFormat))
         let pixelsPerUnit = max(1, alignment / 4)
@@ -90,9 +93,10 @@ public final class MetalRenderer {
     }
 
     /// - Parameters:
-    ///   - width: 端末のピクセル幅。境界に合うよう内部で切り上げる。
-    ///   - fragmentSource: フラグメントシェーダの MSL。頂点シェーダは自動で前置する。
-    ///   - fragmentFunctionName: fragmentSource 内のエントリポイント名。
+    ///   - requestedWidth: the terminal's pixel width, rounded up internally.
+    ///   - fragmentSource: MSL for the fragment shader. The vertex shader is
+    ///     prepended automatically.
+    ///   - fragmentFunctionName: entry point inside fragmentSource.
     public init(
         width requestedWidth: Int,
         height: Int,
@@ -140,7 +144,8 @@ public final class MetalRenderer {
         }
     }
 
-    /// 1x1 の黒。iChannel0 を使わないシェーダでもバインドは害にならない。
+    /// A 1x1 black texture. Binding it is harmless for shaders that never touch
+    /// iChannel0.
     private static func makeBlackTexture(device: MTLDevice) throws -> MTLTexture {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm, width: 1, height: 1, mipmapped: false
@@ -159,11 +164,12 @@ public final class MetalRenderer {
         return texture
     }
 
-    /// 共有メモリを直接レンダーターゲットにして 1 フレーム描く。
-    /// GPU の完了を待ってから返るので、戻った時点で共有メモリの中身は確定している。
+    /// Draws one frame with shared memory as the render target. The GPU is
+    /// waited on, so the shared memory holds a finished frame when this returns.
     ///
-    /// uniform は spirv-cross が binding 1 に置くので buffer(1) に束ねる
-    /// （Ghostty も MSL_ENABLE_DECORATION_BINDING で同じ位置に置いている）。
+    /// spirv-cross places the uniform block at binding 1, so it is bound to
+    /// buffer(1) - Ghostty puts it in the same place via
+    /// MSL_ENABLE_DECORATION_BINDING.
     public func render(into frame: ShmFrame, uniforms: UniformBuffer) throws {
         guard frame.mappedBytes >= payloadBytes else {
             throw MetalRendererError.frameTooSmall(needed: payloadBytes, actual: frame.mappedBytes)
@@ -172,7 +178,7 @@ public final class MetalRenderer {
             throw MetalRendererError.textureCreation(bytesPerRow: bytesPerRow, alignment: linearAlignment)
         }
 
-        // mmap の返り値はページ境界に整列しているので bytesNoCopy の要件を満たす。
+        // mmap returns a page-aligned pointer, which is what bytesNoCopy needs.
         guard let buffer = device.makeBuffer(
             bytesNoCopy: frame.base,
             length: frame.mappedBytes,

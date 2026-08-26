@@ -3,14 +3,15 @@ import GeneratedShaders
 import Metal
 import SaverCore
 
-// 共有メモリ上に直接レンダーターゲットを置き、GPU の描画結果をそのまま
-// kitty graphics protocol で送る。
+// Puts the render target directly in shared memory and ships what the GPU drew
+// through the kitty graphics protocol.
 //
-// シェーダは shaders/*.glsl（Shadertoy 形式）を Scripts/build-shaders.sh が
-// MSL に変換したものを使う。uniform は Ghostty の shadertoy_prefix.glsl と
-// 同じ宣言なので、同じ .glsl を Ghostty の custom-shader に置いても動く。
+// Shaders come from shaders/*.glsl (Shadertoy form), converted to MSL by
+// Scripts/build-shaders.sh. The uniform declarations are Ghostty's own
+// shadertoy_prefix.glsl, so the same .glsl also works as a Ghostty
+// custom-shader.
 
-// MARK: - オプション
+// MARK: - Options
 
 struct Options {
     var explicitSize: (width: Int, height: Int)?
@@ -26,17 +27,17 @@ struct Options {
 let availableShaders = GeneratedShaders.all.map(\.name).joined(separator: ", ")
 
 let usage = """
-使い方: ghostty-saver [オプション]
+usage: ghostty-saver [options]
 
-  --shader NAME     使うシェーダ（既定は最初のもの）。利用可能: \(availableShaders)
-  --size WxH        端末に問い合わせず解像度を明示する
-  --seconds N       N 秒で終了する（既定はキー入力があるまで動き続ける）
-  --frames N        N フレームで終了する
-  --fps N           目標フレームレート（既定 60、0 で上限なし）
-  --quiet-level N   0=応答あり（既定）, 1=エラーのみ, 2=応答なし
-  --verify          端末に出さず 1 フレーム描いて共有メモリの中身を検証する
-  --stats           終了時に 1 フレームあたりの内訳を出す
-  -h, --help        この使い方を表示する
+  --shader NAME     which shader to use (default: the first). available: \(availableShaders)
+  --size WxH        state the resolution instead of asking the terminal
+  --seconds N       stop after N seconds (default: run until a key is pressed)
+  --frames N        stop after N frames
+  --fps N           target frame rate (default 60, 0 for uncapped)
+  --quiet-level N   0=replies on (default), 1=errors only, 2=no replies
+  --verify          render one frame without a terminal and check shared memory
+  --stats           print a per-frame breakdown on exit
+  -h, --help        show this message
 """
 
 func parseOptions() -> Options {
@@ -45,7 +46,7 @@ func parseOptions() -> Options {
 
     func nextValue(_ flag: String) -> String {
         guard !arguments.isEmpty else {
-            FileHandle.standardError.write(Data("\(flag) に値がありません\n".utf8))
+            FileHandle.standardError.write(Data("\(flag) needs a value\n".utf8))
             exit(2)
         }
         return arguments.removeFirst()
@@ -63,7 +64,7 @@ func parseOptions() -> Options {
             let value = nextValue(argument)
             let parts = value.lowercased().split(separator: "x")
             guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]), w > 0, h > 0 else {
-                FileHandle.standardError.write(Data("--size は WxH 形式で指定してください: \(value)\n".utf8))
+                FileHandle.standardError.write(Data("--size expects WxH: \(value)\n".utf8))
                 exit(2)
             }
             options.explicitSize = (w, h)
@@ -80,7 +81,7 @@ func parseOptions() -> Options {
         case "--stats":
             options.stats = true
         default:
-            FileHandle.standardError.write(Data("不明なオプション: \(argument)\n\n\(usage)\n".utf8))
+            FileHandle.standardError.write(Data("unknown option: \(argument)\n\n\(usage)\n".utf8))
             exit(2)
         }
     }
@@ -100,12 +101,12 @@ func report(_ text: String) {
 func selectShader(named name: String?) -> ShaderProgram {
     guard let name else {
         guard let first = GeneratedShaders.all.first else {
-            fail("シェーダが 1 本も生成されていません。Scripts/build-shaders.sh を実行してください。")
+            fail("no shaders were generated; run Scripts/build-shaders.sh")
         }
         return first
     }
     guard let program = GeneratedShaders.all.first(where: { $0.name == name }) else {
-        fail("シェーダ \(name) がありません。利用可能: \(availableShaders)")
+        fail("no shader named \(name); available: \(availableShaders)")
     }
     return program
 }
@@ -123,24 +124,24 @@ func makeRenderer(program: ShaderProgram, width: Int, height: Int) -> MetalRende
     }
 }
 
-// MARK: - 検証モード
+// MARK: - Verification
 
-/// 端末を使わず、共有メモリに載った描画結果を直接読んで確認する。
+/// Renders without a terminal and reads the result straight out of shared memory.
 func runVerify(program: ShaderProgram, width: Int, height: Int) -> Never {
     prepareShmTracking()
     let renderer = makeRenderer(program: program, width: width, height: height)
 
     guard var state = ShadertoyState(device: renderer.device, width: renderer.width, height: renderer.height) else {
-        fail("uniform バッファを確保できません")
+        fail("could not allocate the uniform buffer")
     }
     state.update(time: 0, frame: 0, frameRate: 0)
 
-    report("デバイス          : \(renderer.device.name)")
-    report("シェーダ          : \(program.name) (エントリポイント \(program.entryPoint))")
-    report("要求解像度        : \(width) x \(height)")
-    report("実解像度          : \(renderer.width) x \(renderer.height) "
-        + "(bytesPerRow=\(renderer.bytesPerRow), linear texture の境界に切り上げ)")
-    report("uniform           : \(ShadertoyUniformLayout.size) バイト")
+    report("device        : \(renderer.device.name)")
+    report("shader        : \(program.name) (entry point \(program.entryPoint))")
+    report("requested     : \(width) x \(height)")
+    report("actual        : \(renderer.width) x \(renderer.height) "
+        + "(bytesPerRow=\(renderer.bytesPerRow), rounded up to the linear texture alignment)")
+    report("uniform       : \(ShadertoyUniformLayout.size) bytes")
 
     do {
         let frame = try ShmFrame.create(
@@ -149,15 +150,15 @@ func runVerify(program: ShaderProgram, width: Int, height: Int) -> Never {
         )
         try renderer.render(into: frame, uniforms: state.uniforms)
 
-        // 共有メモリ側を直接読む。GPU の書き込みがそのまま載っているはず。
+        // Read shared memory directly; the GPU writes should be sitting there.
         let pixels = frame.base.assumingMemoryBound(to: UInt8.self)
         func pixel(_ x: Int, _ y: Int) -> String {
             let offset = y * renderer.bytesPerRow + x * 4
             return "(\(pixels[offset]),\(pixels[offset + 1]),\(pixels[offset + 2]),\(pixels[offset + 3]))"
         }
-        report("共有メモリの実データ (RGBA)")
-        report("  左上 \(pixel(0, 0))  右上 \(pixel(renderer.width - 1, 0))")
-        report("  左下 \(pixel(0, renderer.height - 1))  右下 \(pixel(renderer.width - 1, renderer.height - 1))")
+        report("shared memory contents (RGBA)")
+        report("  top-left \(pixel(0, 0))  top-right \(pixel(renderer.width - 1, 0))")
+        report("  bottom-left \(pixel(0, renderer.height - 1))  bottom-right \(pixel(renderer.width - 1, renderer.height - 1))")
         frame.closeMapping()
     } catch {
         fail("\(error)")
@@ -167,7 +168,7 @@ func runVerify(program: ShaderProgram, width: Int, height: Int) -> Never {
     exit(0)
 }
 
-// MARK: - 起動
+// MARK: - Startup
 
 let options = parseOptions()
 let program = selectShader(named: options.shaderName)
@@ -178,7 +179,7 @@ if options.verify {
 }
 
 let outputIsTTY = TerminalSession.openOutput(sinkPath: nil)
-guard outputIsTTY else { fail("端末に接続されていません（検証だけなら --verify を使ってください）") }
+guard outputIsTTY else { fail("not attached to a terminal (use --verify to check without one)") }
 
 let size: TerminalSize
 if let explicit = options.explicitSize {
@@ -187,13 +188,13 @@ if let explicit = options.explicitSize {
     do {
         size = try resolveTerminalSize(fd: TerminalSession.outputFD)
     } catch {
-        fail("端末サイズを取得できません: \(error)")
+        fail("could not determine the terminal size: \(error)")
     }
 }
 
 let renderer = makeRenderer(program: program, width: size.pixelWidth, height: size.pixelHeight)
 guard var state = ShadertoyState(device: renderer.device, width: renderer.width, height: renderer.height) else {
-    fail("uniform バッファを確保できません")
+    fail("could not allocate the uniform buffer")
 }
 
 TerminalSession.prepare()
@@ -225,7 +226,7 @@ while !stopped {
 
     let frameStart = monotonicNow()
 
-    // 端末は読み終えた shm を自分で unlink するので毎フレーム作り直す。
+    // The terminal unlinks a segment once it has read it, so every frame needs a new one.
     let shmStart = monotonicNow()
     let frame: ShmFrame
     do {
@@ -269,7 +270,7 @@ while !stopped {
             stopped = true
         case .timeout:
             TerminalSession.restore()
-            report("端末から応答が来ませんでした（frame \(frameIndex)）")
+            report("no reply from the terminal (frame \(frameIndex))")
             exit(1)
         }
         ackSamples.append(monotonicNow() - ackStart)
@@ -281,7 +282,7 @@ while !stopped {
         }
     }
 
-    // 目標フレームレートに合わせて余った時間を寝る。
+    // Sleep off whatever is left of the target frame interval.
     if frameInterval > 0 {
         let remaining = frameInterval - (monotonicNow() - frameStart)
         if remaining > 0 { usleep(useconds_t(remaining * 1_000_000)) }
@@ -294,20 +295,20 @@ TerminalSession.restore()
 if options.stats {
     report("")
     report("=== ghostty-saver ===")
-    report("デバイス          : \(renderer.device.name)")
-    report("シェーダ          : \(program.name)")
-    report("解像度            : \(renderer.width) x \(renderer.height) px "
-        + "(端末は \(size.pixelWidth) x \(size.pixelHeight))")
-    report("1 フレーム        : \(String(format: "%.2f", Double(renderer.payloadBytes) / 1_048_576)) MiB")
-    report("フレーム数        : \(frameIndex)")
-    report("経過              : \(String(format: "%.3f", elapsed)) 秒")
-    report("実効 fps          : \(String(format: "%.2f", elapsed > 0 ? Double(frameIndex) / elapsed : 0))")
+    report("device         : \(renderer.device.name)")
+    report("shader         : \(program.name)")
+    report("resolution     : \(renderer.width) x \(renderer.height) px "
+        + "(terminal reports \(size.pixelWidth) x \(size.pixelHeight))")
+    report("per frame      : \(String(format: "%.2f", Double(renderer.payloadBytes) / 1_048_576)) MiB")
+    report("frames         : \(frameIndex)")
+    report("elapsed        : \(String(format: "%.3f", elapsed)) s")
+    report("effective fps  : \(String(format: "%.2f", elapsed > 0 ? Double(frameIndex) / elapsed : 0))")
     report("")
-    report("1 フレームあたりの内訳 (ms)")
-    report("  shm 作成        : \(shmSamples.summaryMilliseconds())")
-    report("  GPU 描画        : \(renderSamples.summaryMilliseconds())")
-    report("  write(2)        : \(writeSamples.summaryMilliseconds())")
+    report("per-frame breakdown (ms)")
+    report("  shm create   : \(shmSamples.summaryMilliseconds())")
+    report("  GPU render   : \(renderSamples.summaryMilliseconds())")
+    report("  write(2)     : \(writeSamples.summaryMilliseconds())")
     if ackSamples.count > 0 {
-        report("  端末応答待ち    : \(ackSamples.summaryMilliseconds())")
+        report("  terminal ack : \(ackSamples.summaryMilliseconds())")
     }
 }

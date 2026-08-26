@@ -1,12 +1,14 @@
 import Foundation
 
-/// フレーム 1 枚を端末へ送る経路。
-/// 段階1では kitty graphics protocol の共有メモリ転送（a=T, t=s）だけを実装するが、
-/// 将来 a=f（事前ベイクしたアニメーションフレーム）へ差し替えられるよう分離しておく。
+/// A path for pushing one frame to the terminal.
+///
+/// Only the kitty graphics protocol shared memory transfer (a=T, t=s) is
+/// implemented, but this is kept separate so it can later be swapped for a=f
+/// (pre-baked animation frames) without touching the rest.
 public protocol FrameTransport {
-    /// フレームを送る。write(2) に要した時間を返す。
+    /// Sends a frame. Returns the time spent inside write(2).
     func send(frame: ShmFrame) throws -> TimeInterval
-    /// 端末に残っている画像・プレースメントを消す。
+    /// Removes every image and placement the terminal still holds.
     func deleteAll() throws
 }
 
@@ -15,19 +17,21 @@ public enum TransportError: Error, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .writeFailed(let e):
-            return "write(2) に失敗: errno=\(e) (\(String(cString: strerror(e))))"
+        case .writeFailed(let code):
+            return "write(2) failed: errno=\(code) (\(String(cString: strerror(code))))"
         }
     }
 }
 
-/// 応答の扱い。
+/// How much the terminal should talk back.
 public enum QuietLevel: Int {
-    /// q=0: OK もエラーも返る。1 フレームごとに応答を読めるので端末の消化速度で律速できる。
+    /// q=0: both OK and errors come back. Reading one response per frame paces
+    /// the loop at whatever the terminal can actually consume.
     case verbose = 0
-    /// q=1: OK は返らずエラーのみ返る。
+    /// q=1: errors only.
     case errorsOnly = 1
-    /// q=2: 一切返らない。送信側スループットの上限測定用。
+    /// q=2: nothing comes back. Measures the send side's ceiling, not the
+    /// terminal's throughput.
     case silent = 2
 }
 
@@ -37,27 +41,36 @@ public struct KittySharedMemoryTransport: FrameTransport {
     public let placementID: UInt32
     public let quiet: QuietLevel
 
-    /// 毎フレーム変わらない部分（カーソルホーム + APC ヘッダ）。
+    /// The part that never changes: cursor home plus the APC header.
     private let prefix: [UInt8]
     private let suffix: [UInt8] = Array("\u{1b}\\".utf8)
 
-    public init(fd: Int32, width: Int, height: Int, imageID: UInt32 = 1, placementID: UInt32 = 1, quiet: QuietLevel) {
+    public init(
+        fd: Int32,
+        width: Int,
+        height: Int,
+        imageID: UInt32 = 1,
+        placementID: UInt32 = 1,
+        quiet: QuietLevel
+    ) {
         self.fd = fd
         self.imageID = imageID
         self.placementID = placementID
         self.quiet = quiet
 
-        // p= を省くと Ghostty は毎回「内部プレースメント ID」を採番して placement を
-        // 積み増す（graphics_storage.zig の addPlacement）。同じ p を指定すると
-        // (image id, placement id) が一致して既存 placement を上書きするので、
-        // フレームを送り続けても placement が 1 個で済む。
-        // C=1 はプレースメント後にカーソルを動かさない指示。
+        // Omitting p makes Ghostty mint a fresh internal placement id on every
+        // command (addPlacement in graphics_storage.zig), so placements pile up
+        // one per frame. Pinning p makes the (image id, placement id) pair
+        // match an existing placement and overwrite it, so a continuous stream
+        // of frames still leaves exactly one placement behind.
+        // C=1 keeps the cursor where it is.
         let keys = "a=T,f=32,s=\(width),v=\(height),t=s,i=\(imageID),p=\(placementID),q=\(quiet.rawValue),C=1"
         self.prefix = Array("\u{1b}[H\u{1b}_G\(keys);".utf8)
     }
 
     public func send(frame: ShmFrame) throws -> TimeInterval {
-        // ペイロードは画像データではなく shm オブジェクト名を base64 したもの。
+        // The payload is not image data - it is the base64 of the shared memory
+        // object's name.
         let payload = Array(Data(frame.name.utf8).base64EncodedString().utf8)
         var bytes = prefix
         bytes.append(contentsOf: payload)
@@ -74,7 +87,7 @@ public struct KittySharedMemoryTransport: FrameTransport {
     }
 }
 
-/// 部分書き込みと EINTR を吸収して全バイト書き切る。
+/// Writes every byte, absorbing partial writes and EINTR.
 public func writeAll(_ fd: Int32, _ bytes: UnsafePointer<UInt8>, _ count: Int) throws {
     var offset = 0
     while offset < count {
@@ -87,7 +100,7 @@ public func writeAll(_ fd: Int32, _ bytes: UnsafePointer<UInt8>, _ count: Int) t
     }
 }
 
-/// 単調時計（秒）。
+/// Monotonic clock, in seconds.
 @inline(__always)
 public func monotonicNow() -> TimeInterval {
     TimeInterval(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / 1_000_000_000

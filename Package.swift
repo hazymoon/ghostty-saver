@@ -6,9 +6,9 @@ let package = Package(
     platforms: [.macOS(.v13)],
     targets: [
         .target(name: "CShim", path: "cshim"),
-        // Scripts/build-shaders.sh が shaders/*.glsl から生成する MSL
+        // MSL that Scripts/build-shaders.sh generates from shaders/*.glsl.
         .target(name: "GeneratedShaders", path: "Generated"),
-        // 転送層・端末制御など spike と本体で共有する部分
+        // Transfer and terminal handling shared by the spike and the saver.
         .target(name: "SaverCore", dependencies: ["CShim"], path: "core"),
         .executableTarget(
             name: "spike",

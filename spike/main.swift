@@ -1,13 +1,14 @@
 import Foundation
 import SaverCore
 
-// 段階1: 転送スパイク。
-// Metal を使わず CPU で作ったグラデーションを kitty graphics protocol の
-// 共有メモリ転送（a=T, t=s）で送り続け、実効 fps と内訳を測る。
+// Transfer spike.
 //
-// 30fps に届かない場合はここで実装を止め、計測値を報告して判断を仰ぐ。
+// Pushes a CPU-generated gradient through the kitty graphics protocol's shared
+// memory transfer (a=T, t=s) and measures the achievable frame rate along with
+// a per-frame breakdown. This exists to answer one question before any Metal
+// code is written: does the transfer path clear 30fps?
 
-// MARK: - オプション
+// MARK: - Options
 
 struct Options {
     var explicitSize: (width: Int, height: Int)?
@@ -17,30 +18,32 @@ struct Options {
     var sinkPath: String?
     var useAltScreen = true
     var ackTimeout: Double = 2.0
-    /// 最終フレームを表示したままキー入力を待つ（表示確認用）
+    /// Keep the last frame on screen and wait for a keypress.
     var hold = false
-    /// 計測せず、応答が来ない原因を切り分ける診断だけを行う
+    /// Skip measurement and only diagnose why replies are missing.
     var probe = false
 }
 
 let usage = """
-使い方: spike [オプション]
+usage: spike [options]
 
-  --size WxH        端末に問い合わせず解像度を明示する（tty が無い環境での計測用）
-  --seconds N       計測秒数（既定 5）
-  --frames N        フレーム数を指定する。--seconds より優先
-  --once            1 フレームだけ送り、キーを押すまで表示したままにする
-  --hold            計測後、キーを押すまで最終フレームを表示したままにする
-  --quiet-level N   0=応答あり（既定・端末の消化速度で律速）, 1=エラーのみ, 2=応答なし
-  --sink PATH       tty ではなく指定パスへ書く（write(2) 以外のコストだけを測る）
-  --probe           計測せず診断だけ行う（KGP が届くか / t=d と t=s のどちらが落ちるか）
-  --no-alt-screen   代替画面へ切り替えない
-  -h, --help        この使い方を表示する
+  --size WxH        state the resolution instead of asking the terminal
+  --seconds N       how long to measure (default 5)
+  --frames N        stop after N frames; takes precedence over --seconds
+  --once            send a single frame and hold it until a key is pressed
+  --hold            hold the last frame until a key is pressed
+  --quiet-level N   0=replies on (default), 1=errors only, 2=no replies
+  --sink PATH       write to PATH instead of the tty, to measure everything but
+                    the terminal
+  --probe           skip measurement; diagnose whether KGP arrives and whether
+                    t=d or t=s is the one failing
+  --no-alt-screen   stay on the primary screen
+  -h, --help        show this message
 
-既定の --quiet-level 0 はフレームごとに端末の応答を待つため、
-実効 fps が「端末が実際に消化できた速度」になる。
---quiet-level 2 は応答を待たない送信側スループットの上限で、
-端末の描画速度とは一致しない。
+The default of --quiet-level 0 waits for one reply per frame, which makes the
+effective frame rate reflect what the terminal actually consumed.
+--quiet-level 2 measures the send side's ceiling and says nothing about how
+fast the terminal draws.
 """
 
 func parseOptions() -> Options {
@@ -49,7 +52,7 @@ func parseOptions() -> Options {
 
     func nextValue(_ flag: String) -> String {
         guard !arguments.isEmpty else {
-            FileHandle.standardError.write(Data("\(flag) に値がありません\n".utf8))
+            FileHandle.standardError.write(Data("\(flag) needs a value\n".utf8))
             exit(2)
         }
         return arguments.removeFirst()
@@ -65,7 +68,7 @@ func parseOptions() -> Options {
             let value = nextValue(argument)
             let parts = value.lowercased().split(separator: "x")
             guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]), w > 0, h > 0 else {
-                FileHandle.standardError.write(Data("--size は WxH 形式で指定してください: \(value)\n".utf8))
+                FileHandle.standardError.write(Data("--size expects WxH: \(value)\n".utf8))
                 exit(2)
             }
             options.explicitSize = (w, h)
@@ -89,14 +92,14 @@ func parseOptions() -> Options {
         case "--no-alt-screen":
             options.useAltScreen = false
         default:
-            FileHandle.standardError.write(Data("不明なオプション: \(argument)\n\n\(usage)\n".utf8))
+            FileHandle.standardError.write(Data("unknown option: \(argument)\n\n\(usage)\n".utf8))
             exit(2)
         }
     }
     return options
 }
 
-// MARK: - 起動時の異常終了
+// MARK: - Failure
 
 func fail(_ message: String) -> Never {
     TerminalSession.restore()
@@ -104,14 +107,14 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-// MARK: - 起動
+// MARK: - Startup
 
 let options = parseOptions()
 
-// 出力先の決定。stdout がリダイレクトされていても /dev/tty があればそちらを使う。
+// Pick the output. Falls back to /dev/tty when standard output is redirected.
 let outputIsTTY = TerminalSession.openOutput(sinkPath: options.sinkPath)
 
-// tty でなければ応答は読めないので q=2 に落とし、解像度も明示指定が要る。
+// Replies cannot be read without a tty, so drop to q=2 there.
 var quiet = options.quiet
 if !outputIsTTY && quiet != .silent {
     quiet = .silent
@@ -124,7 +127,7 @@ if let explicit = options.explicitSize {
     do {
         size = try resolveTerminalSize(fd: TerminalSession.outputFD)
     } catch {
-        fail("端末サイズを取得できません: \(error)")
+        fail("could not determine the terminal size: \(error)")
     }
 }
 
@@ -141,23 +144,28 @@ if outputIsTTY {
 }
 
 if options.probe {
-    guard outputIsTTY else { fail("--probe は tty が必要です") }
+    guard outputIsTTY else { fail("--probe needs a tty") }
     runProbe(fd: TerminalSession.outputFD, size: size)
     TerminalSession.restore()
     exit(0)
 }
 
-// MARK: - 計測ループ
+// MARK: - Measurement loop
 
-let transport = KittySharedMemoryTransport(fd: TerminalSession.outputFD, width: width, height: height, quiet: quiet)
+let transport = KittySharedMemoryTransport(
+    fd: TerminalSession.outputFD,
+    width: width,
+    height: height,
+    quiet: quiet
+)
 let renderer = GradientRenderer(width: width, height: height)
 let reader = outputIsTTY ? ResponseReader(fd: TerminalSession.outputFD) : nil
 
-var shmCreateSamples = Samples()   // shm_open + ftruncate
-var fillSamples = Samples()        // グラデーション書き込み
+var shmCreateSamples = Samples()   // shm_open + ftruncate + mmap
+var fillSamples = Samples()        // gradient generation
 var unmapSamples = Samples()       // munmap + close
 var writeSamples = Samples()       // write(2)
-var ackSamples = Samples()         // 端末の応答待ち
+var ackSamples = Samples()         // waiting on the terminal
 
 let pid = getpid()
 var frameCounter: UInt64 = 0
@@ -172,7 +180,8 @@ while true {
     if let maxFrames = options.maxFrames, frameCounter >= UInt64(maxFrames) { break }
     if options.maxFrames == nil && monotonicNow() >= deadline { break }
 
-    // 端末は読み終えた shm を自分で unlink するため、毎フレーム新しい名前で作り直す。
+    // The terminal unlinks a segment once it has read it, so every frame needs
+    // a new name.
     let name = makeShmName(pid: pid, counter: frameCounter)
 
     let createStart = monotonicNow()
@@ -182,7 +191,7 @@ while true {
     } catch {
         fail("\(error)")
     }
-    // create の中で mmap まで済ませているので、内訳は create 全体として計上する。
+    // create() already includes the mmap, so it is billed as one step.
     let created = monotonicNow()
     shmCreateSamples.append(created - createStart)
 
@@ -203,8 +212,8 @@ while true {
 
     frameCounter += 1
 
-    // 応答あり（q=0/q=1）なら 1 フレームごとに端末の消化を待つ。
-    // これがフレームレートの律速になり、実効 fps が端末側の実力を表す。
+    // With replies on, waiting for one per frame makes the terminal the pacer,
+    // so the effective frame rate reflects its real throughput.
     if let reader, quiet != .silent {
         let ackStart = monotonicNow()
         var settled = false
@@ -217,14 +226,14 @@ while true {
                 stoppedByUser = true
                 settled = true
             case .timeout:
-                ackFailure = "端末から \(options.ackTimeout) 秒以内に応答が来なかった（frame \(frameCounter)）"
+                ackFailure = "no reply within \(options.ackTimeout)s (frame \(frameCounter))"
                 settled = true
             }
         }
         ackSamples.append(monotonicNow() - ackStart)
         if stoppedByUser || ackFailure != nil { break }
     } else if outputIsTTY {
-        // 応答なしモードでもキー入力での中断は受け付ける。
+        // Even without replies, a keypress should still stop the loop.
         var pfd = pollfd(fd: TerminalSession.outputFD, events: Int16(POLLIN), revents: 0)
         if poll(&pfd, 1, 0) > 0 {
             var discard: UInt8 = 0
@@ -235,7 +244,8 @@ while true {
 
 let elapsed = monotonicNow() - loopStart
 
-// 後始末は画像削除と代替画面終了を含むので、表示確認したいときはその前で待つ。
+// Restoring deletes the image and leaves the alternate screen, so hold before
+// that when the frame is meant to be looked at.
 if options.hold && outputIsTTY && !stoppedByUser {
     var pfd = pollfd(fd: TerminalSession.outputFD, events: Int16(POLLIN), revents: 0)
     _ = poll(&pfd, 1, -1)
@@ -245,7 +255,7 @@ if options.hold && outputIsTTY && !stoppedByUser {
 
 TerminalSession.restore()
 
-// MARK: - 報告
+// MARK: - Report
 
 func line(_ text: String) {
     FileHandle.standardError.write(Data((text + "\n").utf8))
@@ -255,36 +265,37 @@ let megabytesPerFrame = Double(payloadBytes) / 1_048_576
 let fps = elapsed > 0 ? Double(frameCounter) / elapsed : 0
 
 line("")
-line("=== 段階1 転送スパイク 計測結果 ===")
-line("解像度            : \(width) x \(height) px (\(size.columns) cols x \(size.rows) rows)")
-line("1 フレーム        : \(String(format: "%.2f", megabytesPerFrame)) MiB (RGBA8)")
-line("応答モード        : q=\(quiet.rawValue) " + (quiet == .silent
-    ? "(応答を読まない = 送信側スループットの上限。端末の描画速度ではない)"
-    : "(フレームごとに端末の応答を待つ = 端末が消化できた速度)"))
-line("フレーム数        : \(frameCounter)")
-line("経過              : \(String(format: "%.3f", elapsed)) 秒")
-line("実効 fps          : \(String(format: "%.2f", fps))")
-line("スループット      : \(String(format: "%.1f", megabytesPerFrame * fps)) MiB/s")
+line("=== transfer spike ===")
+line("resolution     : \(width) x \(height) px (\(size.columns) cols x \(size.rows) rows)")
+line("per frame      : \(String(format: "%.2f", megabytesPerFrame)) MiB (RGBA8)")
+line("reply mode     : q=\(quiet.rawValue) " + (quiet == .silent
+    ? "(replies ignored: send-side ceiling, not the terminal's draw rate)"
+    : "(one reply per frame: what the terminal actually consumed)"))
+line("frames         : \(frameCounter)")
+line("elapsed        : \(String(format: "%.3f", elapsed)) s")
+line("effective fps  : \(String(format: "%.2f", fps))")
+line("throughput     : \(String(format: "%.1f", megabytesPerFrame * fps)) MiB/s")
 line("")
-line("1 フレームあたりの内訳 (ms)")
-line("  shm 作成        : \(shmCreateSamples.summaryMilliseconds())   ← shm_open + ftruncate + mmap")
-line("  書き込み        : \(fillSamples.summaryMilliseconds())   ← CPU グラデーション生成")
-line("  unmap + close   : \(unmapSamples.summaryMilliseconds())")
-line("  write(2)        : \(writeSamples.summaryMilliseconds())")
+line("per-frame breakdown (ms)")
+line("  shm create   : \(shmCreateSamples.summaryMilliseconds())   <- shm_open + ftruncate + mmap")
+line("  generate     : \(fillSamples.summaryMilliseconds())   <- CPU gradient")
+line("  unmap+close  : \(unmapSamples.summaryMilliseconds())")
+line("  write(2)     : \(writeSamples.summaryMilliseconds())")
 if ackSamples.count > 0 {
-    line("  端末応答待ち    : \(ackSamples.summaryMilliseconds())")
+    line("  terminal ack : \(ackSamples.summaryMilliseconds())")
 }
 line("")
 
 let selfCost = shmCreateSamples.mean + fillSamples.mean + unmapSamples.mean + writeSamples.mean
-line("送信側の合計      : \(String(format: "%.3f", selfCost * 1000)) ms/frame "
-    + "(理論上限 \(String(format: "%.1f", selfCost > 0 ? 1 / selfCost : 0)) fps)")
+line("send side total: \(String(format: "%.3f", selfCost * 1000)) ms/frame "
+    + "(ceiling \(String(format: "%.1f", selfCost > 0 ? 1 / selfCost : 0)) fps)")
 
-if stoppedByUser { line("※ キー入力で中断した") }
-if let ackFailure { line("※ \(ackFailure)") }
+if stoppedByUser { line("note: stopped by a keypress") }
+if let ackFailure { line("note: \(ackFailure)") }
 if !errorResponses.isEmpty {
-    line("※ 端末がエラー応答を返した (\(errorResponses.count) 件): \(errorResponses.prefix(3).joined(separator: " / "))")
+    line("note: the terminal returned errors (\(errorResponses.count)): "
+        + errorResponses.prefix(3).joined(separator: " / "))
 }
 if fps < 30 && ackFailure == nil && !stoppedByUser {
-    line("※ 30fps に届いていない。解像度を落とすか t=t への切り替えを検討する必要がある。")
+    line("note: below 30fps. Either drop the resolution or switch to t=t.")
 }

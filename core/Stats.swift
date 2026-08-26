@@ -1,6 +1,6 @@
 import Foundation
 
-/// 秒単位のサンプル列を集計してミリ秒で報告する。
+/// Collects a series of durations in seconds and reports them in milliseconds.
 public struct Samples {
     public private(set) var values: [Double] = []
 
@@ -19,9 +19,9 @@ public struct Samples {
         return sorted[index]
     }
 
-    /// "mean 1.23 / p50 1.10 / p95 2.40 / max 5.00 ms" 形式
+    /// Formats as "mean 1.230  p50 1.100  p95 2.400  max 5.000".
     public func summaryMilliseconds() -> String {
-        func ms(_ v: Double) -> String { String(format: "%6.3f", v * 1000) }
+        func ms(_ value: Double) -> String { String(format: "%6.3f", value * 1000) }
         return "mean \(ms(mean))  p50 \(ms(percentile(0.5)))  p95 \(ms(percentile(0.95)))  max \(ms(percentile(1.0)))"
     }
 }

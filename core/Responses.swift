@@ -1,16 +1,16 @@
 import Foundation
 
-/// 端末から返ってきたもの。
+/// What came back from the terminal.
 public enum TerminalEvent {
-    /// APC 応答（kitty graphics protocol の `ESC _ G ... ESC \`）の中身
+    /// The body of an APC reply (`ESC _ G ... ESC \`).
     case response(String)
-    /// APC 以外のバイト。スパイクではキー入力とみなして終了に使う。
+    /// A byte that was not part of an APC. Treated as a keypress.
     case userInput
-    /// 期限内に何も来なかった
+    /// Nothing arrived before the deadline.
     case timeout
 }
 
-/// tty からの応答を APC 単位で切り出す。raw モード前提。
+/// Splits terminal input into APC replies. Assumes raw mode.
 public final class ResponseReader {
     private let fd: Int32
     private var state: State = .idle
@@ -29,12 +29,13 @@ public final class ResponseReader {
         self.fd = fd
     }
 
-    /// APC 応答が 1 件揃うか、APC 以外のバイトを見るか、期限切れになるまで待つ。
+    /// Waits until one complete APC reply arrives, a non-APC byte shows up, or
+    /// the deadline passes.
     public func next(timeout: TimeInterval) -> TerminalEvent {
         let deadline = monotonicNow() + timeout
 
         while true {
-            // 前回の read で余ったバイトを先に消化する
+            // Drain whatever the previous read left over first.
             while !pending.isEmpty {
                 let byte = pending.removeFirst()
                 if let event = feed(byte) { return event }
@@ -72,7 +73,7 @@ public final class ResponseReader {
                 apcBuffer.removeAll(keepingCapacity: true)
                 return nil
             }
-            // APC ではない ESC シーケンス。キー入力（矢印キー等）とみなす。
+            // An escape sequence that is not an APC, e.g. an arrow key.
             state = .idle
             return .userInput
 

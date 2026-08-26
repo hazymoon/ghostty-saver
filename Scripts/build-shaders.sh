@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
 # @file build-shaders.sh
-# @brief Shadertoy 形式の GLSL を MSL に変換し Swift の文字列リテラルとして埋め込む
+# @brief Convert Shadertoy-style GLSL to MSL and embed it as Swift string literals
 # @description
-#   shaders/*.glsl を対象に、Ghostty と同じ uniform 宣言を前置してから
-#   glslangValidator で SPIR-V にし、spirv-cross で MSL に変換する。
-#   同じ .glsl ファイルが Ghostty の custom-shader としてもそのまま動くことが
-#   この構成の目的なので、前置する宣言は Ghostty の shadertoy_prefix.glsl を
-#   使う。ただしこのリポジトリには取り込まず、実行時に固定のタグから取得する。
-#   取得したものは一時ディレクトリに置き、成果物には含めない。
+#   For every shaders/*.glsl, prepend the same uniform declarations Ghostty
+#   uses, compile to SPIR-V with glslangValidator, and convert to MSL with
+#   spirv-cross.
 #
-#   ネットワークを使いたくない場合は GHOSTTY_SAVER_PREFIX_FILE に手元の
-#   shadertoy_prefix.glsl のパスを渡す。
+#   Dropping the same .glsl into Ghostty's custom-shader and having it work is a
+#   design goal, so the prepended declarations are Ghostty's own
+#   shadertoy_prefix.glsl rather than a transcription of it. It is fetched from
+#   a pinned tag into a temporary directory rather than kept here, so no
+#   Ghostty source is carried in this repository or in the build output.
 #
-#   uniform のオフセットは手書きせず spirv-cross のリフレクションから生成する。
+#   Set GHOSTTY_SAVER_PREFIX_FILE to a local copy to work without a network,
+#   or GHOSTTY_SAVER_PREFIX_REF to move the pin.
 #
-#   生成物 Generated/Shaders.swift はコミットするため、シェーダを変更しない
-#   ビルドではこのスクリプトも変換ツールも不要。
+#   Uniform offsets are generated from spirv-cross reflection instead of being
+#   written by hand.
 #
-# @section 依存
+#   Generated/Shaders.swift is committed, so a build that does not change any
+#   shader needs neither this script nor the conversion tools.
+#
+# @section Dependencies
 #   brew install glslang spirv-cross
 #
-# @section 使い方
+# @section Usage
 #   Scripts/build-shaders.sh
 
 set -euo pipefail
@@ -28,40 +32,41 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 shader_dir="$repo_root/shaders"
 output_file="$repo_root/Generated/Shaders.swift"
-# 前置する uniform 宣言の取得元。タグに固定して勝手に変わらないようにする。
+# Where the uniform declarations come from. Pinned to a tag so it cannot move
+# underneath a build.
 ghostty_ref="${GHOSTTY_SAVER_PREFIX_REF:-v1.3.1}"
 prefix_url="https://raw.githubusercontent.com/ghostty-org/ghostty/$ghostty_ref/src/renderer/shaders/shadertoy_prefix.glsl"
 
-# @description 変換ツールを解決する。glslang は配布によって実行ファイル名が異なる。
+# @description Locate the conversion tools. glslang ships under two names.
 resolve_tools() {
     if command -v glslangValidator > /dev/null 2>&1; then
         glslang_bin="glslangValidator"
     elif command -v glslang > /dev/null 2>&1; then
         glslang_bin="glslang"
     else
-        echo "glslangValidator が見つかりません。brew install glslang spirv-cross を実行してください。" >&2
+        echo "glslangValidator not found. Run: brew install glslang spirv-cross" >&2
         exit 1
     fi
 
     if ! command -v spirv-cross > /dev/null 2>&1; then
-        echo "spirv-cross が見つかりません。brew install glslang spirv-cross を実行してください。" >&2
+        echo "spirv-cross not found. Run: brew install glslang spirv-cross" >&2
         exit 1
     fi
 
     if ! command -v python3 > /dev/null 2>&1; then
-        echo "python3 が見つかりません（uniform のオフセット生成に使います）。" >&2
+        echo "python3 not found (needed to generate the uniform offsets)." >&2
         exit 1
     fi
 
     if [ -z "${GHOSTTY_SAVER_PREFIX_FILE:-}" ] && ! command -v curl > /dev/null 2>&1; then
-        echo "curl が見つかりません。GHOSTTY_SAVER_PREFIX_FILE に手元の" >&2
-        echo "shadertoy_prefix.glsl のパスを渡してください。" >&2
+        echo "curl not found. Set GHOSTTY_SAVER_PREFIX_FILE to a local copy of" >&2
+        echo "shadertoy_prefix.glsl instead." >&2
         exit 1
     fi
 }
 
-# @description ファイル名から Swift の識別子を作る。matrix.glsl -> matrix
-# @arg $1 string 拡張子を除いたファイル名
+# @description Turn a file name into a Swift identifier. matrix.glsl -> matrix
+# @arg $1 string file name without its extension
 swift_identifier() {
     python3 -c '
 import re, sys
@@ -78,16 +83,16 @@ trap 'rm -r -- "$work_dir" 2> /dev/null || true' EXIT
 prefix_file="$work_dir/prefix.glsl"
 if [ -n "${GHOSTTY_SAVER_PREFIX_FILE:-}" ]; then
     if [ ! -f "$GHOSTTY_SAVER_PREFIX_FILE" ]; then
-        echo "GHOSTTY_SAVER_PREFIX_FILE=$GHOSTTY_SAVER_PREFIX_FILE がありません。" >&2
+        echo "GHOSTTY_SAVER_PREFIX_FILE=$GHOSTTY_SAVER_PREFIX_FILE does not exist." >&2
         exit 1
     fi
     cp "$GHOSTTY_SAVER_PREFIX_FILE" "$prefix_file"
-    echo "uniform 宣言: $GHOSTTY_SAVER_PREFIX_FILE"
+    echo "uniform declarations: $GHOSTTY_SAVER_PREFIX_FILE"
 else
-    echo "uniform 宣言を取得中: $prefix_url"
+    echo "fetching uniform declarations: $prefix_url"
     if ! curl -fsSL "$prefix_url" -o "$prefix_file"; then
-        echo "取得に失敗しました: $prefix_url" >&2
-        echo "オフラインなら GHOSTTY_SAVER_PREFIX_FILE に手元のパスを渡してください。" >&2
+        echo "could not fetch $prefix_url" >&2
+        echo "Offline? Set GHOSTTY_SAVER_PREFIX_FILE to a local copy." >&2
         exit 1
     fi
 fi
@@ -102,36 +107,40 @@ for glsl in "$shader_dir"/*.glsl; do
     stem="$(basename "$glsl" .glsl)"
 
     identifier="$(swift_identifier "$stem")"
-    echo "変換中: $stem -> $identifier"
+    echo "converting: $stem -> $identifier"
 
-    # 1. uniform 宣言と main() ラッパを前置して完全な GLSL フラグメントシェーダにする
+    # 1. Prepend the uniform declarations and the main() wrapper to make a
+    #    complete GLSL fragment shader.
     cat "$prefix_file" "$glsl" > "$work_dir/$stem.frag"
 
-    # 2. SPIR-V にする
+    # 2. Compile to SPIR-V.
     if ! "$glslang_bin" -V -S frag "$work_dir/$stem.frag" -o "$work_dir/$stem.spv" > "$work_dir/$stem.glslang.log" 2>&1; then
-        echo "glslang が失敗しました: $glsl" >&2
+        echo "glslang failed on $glsl" >&2
         cat "$work_dir/$stem.glslang.log" >&2
         exit 1
     fi
 
-    # 3. MSL に変換する
+    # 3. Convert to MSL. --msl-decoration-binding matches what Ghostty passes
+    #    (MSL_ENABLE_DECORATION_BINDING), which puts the uniform block at
+    #    buffer(1).
     spirv-cross --msl --msl-decoration-binding "$work_dir/$stem.spv" > "$work_dir/$stem.metal"
 
-    # MSL のエントリポイント名は spirv-cross が付け替える（main -> main0）ので実物から拾う
+    # spirv-cross renames the entry point (main -> main0), so read it back out
+    # rather than assuming.
     entry_point="$(sed -n 's/^fragment [A-Za-z0-9_]* \([A-Za-z0-9_]*\)(.*/\1/p' "$work_dir/$stem.metal" | head -1)"
     if [ -z "$entry_point" ]; then
-        echo "$stem の MSL からフラグメントのエントリポイントを特定できませんでした。" >&2
+        echo "could not find the fragment entry point in the MSL for $stem." >&2
         exit 1
     fi
 
-    # 4. uniform ブロックのオフセットをリフレクションから取る。
-    #    prefix は全シェーダ共通なので、レイアウトが食い違ったら生成側の不整合。
+    # 4. Pull the uniform block's offsets out of reflection. The prefix is
+    #    shared, so a mismatch means something is wrong on the generating side.
     spirv-cross --reflect --output "$work_dir/$stem.json" "$work_dir/$stem.spv"
     generated_layout="$(python3 "$repo_root/Scripts/emit-uniform-layout.py" "$work_dir/$stem.json")"
     if [ -z "$layout_swift" ]; then
         layout_swift="$generated_layout"
     elif [ "$layout_swift" != "$generated_layout" ]; then
-        echo "$stem の uniform レイアウトが他のシェーダと一致しません。" >&2
+        echo "the uniform layout for $stem disagrees with the other shaders." >&2
         exit 1
     fi
 
@@ -147,15 +156,15 @@ for glsl in "$shader_dir"/*.glsl; do
 done
 
 if [ -z "$layout_swift" ]; then
-    echo "変換対象の .glsl が $shader_dir にありません。" >&2
+    echo "no .glsl to convert in $shader_dir." >&2
     exit 1
 fi
 
 {
-    echo "// このファイルは Scripts/build-shaders.sh が生成する。直接編集しない。"
-    echo "// 元データ: shaders/*.glsl と Ghostty の shadertoy_prefix.glsl"
+    echo "// Generated by Scripts/build-shaders.sh. Do not edit."
+    echo "// Sources: shaders/*.glsl and Ghostty's shadertoy_prefix.glsl"
     echo ""
-    echo "/// 1 本のシェーダの MSL と、その中のフラグメント関数名。"
+    echo "/// One shader's MSL plus the name of its fragment function."
     echo "public struct ShaderProgram {"
     echo "    public let name: String"
     echo "    public let entryPoint: String"
@@ -164,12 +173,12 @@ fi
     echo ""
     echo "$layout_swift"
     echo ""
-    echo "/// shaders/*.glsl から生成した MSL。"
+    echo "/// MSL generated from shaders/*.glsl."
     echo "public enum GeneratedShaders {"
     printf '%s' "$shader_entries"
-    echo "    /// 変換済みシェーダの一覧。名前で選ぶときに使う。"
+    echo "    /// Every converted shader, for selecting one by name."
     echo "    public static let all: [ShaderProgram] = [$identifiers]"
     echo "}"
 } > "$output_file"
 
-echo "生成しました: $output_file"
+echo "wrote: $output_file"

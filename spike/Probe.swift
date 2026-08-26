@@ -1,10 +1,12 @@
 import Foundation
 import SaverCore
 
-// 応答が来ない原因を切り分けるための診断モード。
-// KGP そのものが届いていないのか、t=s（共有メモリ）だけが失敗しているのかを分ける。
+// Diagnostics for "the terminal never answered".
+// Separates "the APC never reached the terminal at all" from "only t=s
+// (shared memory) is failing".
 
-/// 期限まで届いたバイトを全部集める（APC 単位に切らず生のまま見る）。
+/// Collects every byte that arrives before the deadline, without splitting it
+/// into APCs.
 private func collectRaw(fd: Int32, timeout: TimeInterval) -> [UInt8] {
     var collected: [UInt8] = []
     var chunk = [UInt8](repeating: 0, count: 256)
@@ -23,9 +25,9 @@ private func collectRaw(fd: Int32, timeout: TimeInterval) -> [UInt8] {
     return collected
 }
 
-/// 制御文字を見えるように起こす。
+/// Makes control characters visible.
 private func readable(_ bytes: [UInt8]) -> String {
-    guard !bytes.isEmpty else { return "(応答なし)" }
+    guard !bytes.isEmpty else { return "(no reply)" }
     var out = ""
     for byte in bytes {
         switch byte {
@@ -41,36 +43,36 @@ private func readable(_ bytes: [UInt8]) -> String {
 }
 
 private func report(_ fd: Int32, _ text: String) {
-    // raw モード中なので改行は CR+LF にする。
+    // Raw mode is on, so newlines have to be CR+LF.
     let line = text + "\r\n"
     _ = line.withCString { write(fd, $0, strlen($0)) }
 
-    // 画面はキー入力後に消えてしまうので、リダイレクトされた標準エラーにも残す。
-    // 標準エラーが tty のままなら二重表示になるだけなので出さない。
+    // The screen is wiped on keypress, so mirror to standard error when it has
+    // been redirected. If it is still a tty this would only double up.
     if isatty(STDERR_FILENO) != 1 {
         let logLine = text + "\n"
         _ = logLine.withCString { write(STDERR_FILENO, $0, strlen($0)) }
     }
 }
 
-/// 診断を実行する。呼び出し側が raw モードにしてあることを前提とする。
+/// Runs the diagnostics. The caller is expected to have entered raw mode.
 func runProbe(fd: Int32, size: TerminalSize) {
     func environmentValue(_ key: String) -> String {
-        ProcessInfo.processInfo.environment[key] ?? "(未設定)"
+        ProcessInfo.processInfo.environment[key] ?? "(unset)"
     }
 
     report(fd, "")
-    report(fd, "=== 診断 ===")
+    report(fd, "=== diagnostics ===")
     report(fd, "TERM         : \(environmentValue("TERM"))")
     report(fd, "TERM_PROGRAM : \(environmentValue("TERM_PROGRAM"))")
     report(fd, "TMUX         : \(environmentValue("TMUX"))")
     report(fd, "winsize      : \(size.columns) cols x \(size.rows) rows / "
         + "\(size.pixelWidth) x \(size.pixelHeight) px "
-        + "(1 セル \(size.columns > 0 ? size.pixelWidth / size.columns : 0)"
+        + "(cell \(size.columns > 0 ? size.pixelWidth / size.columns : 0)"
         + " x \(size.rows > 0 ? size.pixelHeight / size.rows : 0) px)")
     report(fd, "")
 
-    // 事前に溜まっている入力（前の実行の応答など）を捨てる。
+    // Drop anything already queued, such as a reply from a previous run.
     _ = collectRaw(fd: fd, timeout: 0.05)
 
     func step(_ label: String, _ sequence: [UInt8], timeout: TimeInterval = 1.0) -> [UInt8] {
@@ -81,24 +83,25 @@ func runProbe(fd: Int32, size: TerminalSize) {
         return response
     }
 
-    // 1. kitty graphics protocol に対応しているかの標準的な問い合わせ。
-    //    OK が返れば APC が端末まで届き、応答も戻ってきている。
+    // 1. The standard kitty graphics support query. An OK means the APC reaches
+    //    the terminal and the reply makes it back.
     let queryResponse = step(
-        "[1] KGP 対応問い合わせ (a=q, t=d)",
+        "[1] KGP support query (a=q, t=d)",
         Array("\u{1b}_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\u{1b}\\".utf8)
     )
 
-    // 2. 画像データを直接埋め込む転送（t=d）。ここが通れば KGP の表示経路は生きている。
+    // 2. Inline image data (t=d). If this works the display path is alive.
     let direct = [UInt8](repeating: 0, count: 4 * 4 * 4).enumerated().map { index, _ -> UInt8 in
-        index % 4 == 3 ? 255 : (index % 4 == 0 ? 255 : 0)   // 不透明な赤
+        index % 4 == 3 ? 255 : (index % 4 == 0 ? 255 : 0)   // opaque red
     }
     let directPayload = Data(direct).base64EncodedString()
     _ = step(
-        "[2] 直接転送 (a=T, t=d, 4x4)",
+        "[2] direct transfer (a=T, t=d, 4x4)",
         Array("\u{1b}_Ga=T,f=32,s=4,v=4,i=32,p=1,q=0,C=1;\(directPayload)\u{1b}\\".utf8)
     )
 
-    // 3. 共有メモリ転送（t=s）。ここだけ落ちるなら shm 名・サイズ・権限の問題。
+    // 3. Shared memory (t=s). Failing only here points at the name, the size or
+    //    the permissions.
     let probeWidth = 64
     let probeHeight = 64
     do {
@@ -109,26 +112,27 @@ func runProbe(fd: Int32, size: TerminalSize) {
         GradientRenderer(width: probeWidth, height: probeHeight).render(into: frame.base, frame: 0)
         frame.closeMapping()
         let namePayload = Data(frame.name.utf8).base64EncodedString()
-        report(fd, "  shm 名: \(frame.name) (\(frame.name.utf8.count) バイト) -> base64: \(namePayload)")
+        report(fd, "  shm name: \(frame.name) (\(frame.name.utf8.count) bytes) -> base64: \(namePayload)")
         _ = step(
-            "[3] 共有メモリ転送 (a=T, t=s, 64x64)",
+            "[3] shared memory transfer (a=T, t=s, 64x64)",
             Array("\u{1b}_Ga=T,f=32,s=\(probeWidth),v=\(probeHeight),t=s,i=33,p=1,q=0,C=1;\(namePayload)\u{1b}\\".utf8)
         )
     } catch {
-        report(fd, "[3] 共有メモリ転送: shm の作成に失敗 -> \(error)")
+        report(fd, "[3] shared memory transfer: could not create the segment -> \(error)")
     }
 
     report(fd, "")
     if queryResponse.isEmpty {
-        report(fd, "判定: [1] にすら応答がない。APC が端末まで届いていないか、応答が横取りされている。")
+        report(fd, "verdict: not even [1] answered. The APC is not reaching the terminal,")
+        report(fd, "         or something is intercepting the reply.")
         if ProcessInfo.processInfo.environment["TMUX"] != nil {
-            report(fd, "      TMUX が設定されている。tmux ペイン内で実行している可能性が高い。")
+            report(fd, "         TMUX is set, so this is most likely running inside a tmux pane.")
         }
     } else {
-        report(fd, "判定: [1] に応答があるので KGP は届いている。[2] と [3] の差を見る。")
+        report(fd, "verdict: [1] answered, so KGP is reaching the terminal. Compare [2] and [3].")
     }
     report(fd, "")
-    report(fd, "何かキーを押すと終了する。")
+    report(fd, "Press any key to exit.")
     var discard: UInt8 = 0
     _ = read(fd, &discard, 1)
 }

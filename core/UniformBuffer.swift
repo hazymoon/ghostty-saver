@@ -1,21 +1,21 @@
 import Foundation
 import Metal
 
-/// フラグメントシェーダへ渡す uniform ブロックの実体。
+/// Backing store for the uniform block handed to the fragment shader.
 ///
-/// メンバ名やオフセットはここでは持たない。オフセットは Generated/Shaders.swift の
-/// `ShadertoyUniformLayout` が spirv-cross のリフレクションから生成しており、
-/// 呼び出し側がそれを使って書き込む。
+/// Member names and offsets do not live here. Generated/Shaders.swift derives
+/// `ShadertoyUniformLayout` from spirv-cross reflection, and callers use those
+/// constants to write into this buffer.
 ///
-/// `setFragmentBytes` は 4KB までしか渡せず uniform ブロックはそれを超えるため、
-/// 常駐の MTLBuffer に持って `setFragmentBuffer` で束ねる。
+/// setFragmentBytes only accepts 4KB and the uniform block is larger, so the
+/// data lives in a resident MTLBuffer bound with setFragmentBuffer.
 public final class UniformBuffer {
     public let buffer: MTLBuffer
     private let base: UnsafeMutableRawPointer
     private let byteCount: Int
 
     public init?(device: MTLDevice, byteCount: Int) {
-        // 16 バイト境界に切り上げておく（末尾の vec3 が 16 バイト分読まれても届くように）
+        // Round up to 16 bytes so a trailing vec3 is still fully addressable.
         let rounded = (byteCount + 15) / 16 * 16
         guard let buffer = device.makeBuffer(length: rounded, options: .storageModeShared) else {
             return nil
@@ -28,8 +28,10 @@ public final class UniformBuffer {
 
     @inline(__always)
     private func store<T>(_ value: T, at offset: Int) {
-        precondition(offset >= 0 && offset + MemoryLayout<T>.size <= byteCount,
-                     "uniform の書き込みがバッファ外に出ています (offset=\(offset))")
+        precondition(
+            offset >= 0 && offset + MemoryLayout<T>.size <= byteCount,
+            "uniform write runs past the end of the buffer (offset=\(offset))"
+        )
         base.advanced(by: offset).storeBytes(of: value, as: T.self)
     }
 
@@ -37,7 +39,8 @@ public final class UniformBuffer {
 
     public func set(_ value: Int32, at offset: Int) { store(value, at: offset) }
 
-    /// std140 の vec3。後続メンバと詰めて並ぶので 3 要素だけ書く。
+    /// A std140 vec3. Only three components are written, since the next member
+    /// may pack into the fourth slot.
     public func set(_ x: Float, _ y: Float, _ z: Float, at offset: Int) {
         store(x, at: offset)
         store(y, at: offset + 4)

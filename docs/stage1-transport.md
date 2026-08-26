@@ -1,74 +1,87 @@
-# 段階1: 転送スパイクの計測結果
+# Transfer spike: measurements
 
-Metal を組む前に転送層だけを切り出し、kitty graphics protocol の共有メモリ転送
-（`a=T`, `t=s`）が 30fps に届くかを実測した記録。
+Before writing any Metal, the transfer path was isolated and measured to answer
+one question: can the kitty graphics protocol's shared memory transfer (`a=T`,
+`t=s`) clear 30fps?
 
-## 計測環境
+## Setup
 
-- Ghostty 1.3.1 / macOS (Apple Silicon)
-- 3832 x 2152 px (319 cols x 82 rows、1 セル 12 x 26 px)
-- 1 フレーム 31.46 MiB (RGBA8)
-- tmux の `lock-command` 経由（本番と同じクライアント tty 直の経路）
-- 計測日: 2026-08-26 / `spike --seconds 5`
+- Ghostty 1.3.1 on macOS (Apple Silicon)
+- 3832 x 2152 px (319 cols x 82 rows, 12 x 26 px per cell)
+- 31.46 MiB per frame (RGBA8)
+- Driven through tmux's `lock-command`, which is the same client-tty-direct path
+  the real screensaver uses
+- 2026-08-26, `spike --seconds 5`
 
-## 結果
+## Results
 
-| | q=0（フレームごとに端末の応答を待つ） | q=2（応答を読まない） |
+| | q=0 (one reply per frame) | q=2 (replies ignored) |
 | --- | ---: | ---: |
-| 実効 fps | 158.39 | 261.54 |
-| スループット | 4982.6 MiB/s | 8227.4 MiB/s |
+| effective fps | 158.39 | 261.54 |
+| throughput | 4982.6 MiB/s | 8227.4 MiB/s |
 
-1 フレームあたりの内訳（q=0, mean, ms）:
+Per-frame breakdown (q=0, mean, ms):
 
-| 内訳 | ms |
+| step | ms |
 | --- | ---: |
-| shm 作成（shm_open + ftruncate + mmap） | 0.012 |
-| CPU グラデーション生成 | 3.592 |
+| shm create (shm_open + ftruncate + mmap) | 0.012 |
+| CPU gradient | 3.592 |
 | unmap + close | 0.091 |
 | write(2) | 0.006 |
-| 端末応答待ち | 2.600 |
+| terminal ack | 2.600 |
 
-## 判断
+## Verdict
 
-**ゲート通過。解像度を落とす必要も `t=t` へ切り替える必要もない。**
+**Clears the gate.** Neither dropping the resolution nor switching to `t=t` is
+necessary.
 
-- 毎フレーム shm を作り直す syscall コストは 0.012 ms で無視できる
-- CPU グラデーション生成の 3.592 ms は段階2で GPU 描画に置き換わって消える
-- 転送層だけのコストは約 2.71 ms/frame（shm 作成 + unmap + write + 端末応答）。
-  60fps なら 1 フレーム 16.7 ms のうち約 14 ms を描画に使える
-- q=2 の 261 fps は送信側の理論上限 263 fps とほぼ一致する。応答なしモードでは
-  CPU 生成だけが律速で、転送経路自体には余裕がある
+- Recreating the shared memory segment every frame costs 0.012 ms, which is
+  noise.
+- The 3.592 ms CPU gradient disappears once Metal draws the frame instead.
+- The transfer path alone is about 2.71 ms/frame (shm create + unmap + write +
+  terminal ack). At 60fps that leaves roughly 14 ms of the 16.7 ms budget for
+  rendering.
+- q=2's 261 fps sits right on the send side's 263 fps ceiling, so with replies
+  off the CPU gradient is the only limit and the transfer path has room to
+  spare.
 
-### 計測の解釈上の注意
+### How to read the numbers
 
-`q=0` の応答は「Ghostty がコマンドを解釈して画像を保持した」時点であって、
-「画面に描かれた」時点ではない。実際の表示レートは Ghostty のレンダラで頭打ちに
-なるため、段階2では送りっぱなしにせず表示レートに合わせてペースを作る。
+A `q=0` reply means "Ghostty parsed the command and stored the image", not
+"the frame is on screen". What is actually displayed is capped by Ghostty's
+renderer, so the real renderer should pace itself to the display rather than
+firing as fast as it can. The point of this measurement is only that the
+transfer path is not the bottleneck.
 
-`t=s` は payload が shm 名だけで数十バイトしかなく、`q=2` では `write(2)` の
-背圧がほぼ効かない。そのため q=2 の数値は送信側スループットの上限であって
-端末の消化速度ではない。ゲート判定には q=0 の値を使っている。
+With `t=s` the payload is just a shared memory name, a few dozen bytes, so
+`write(2)` provides almost no backpressure under `q=2`. That number is the send
+side's ceiling, not the terminal's throughput, which is why the gate uses the
+`q=0` figure.
 
-## 実装上わかったこと
+## What the Ghostty source says
 
-Ghostty 1.3.1 のソース（`src/terminal/kitty`）で確認した挙動。
+Confirmed against `src/terminal/kitty` in Ghostty 1.3.1.
 
-- `t=s` は base64 デコードした payload をそのまま `shm_open` に渡す。
-  よって shm 名には先頭の `/` が必要（macOS の `PSHMNAMLEN` は 31 バイト）
-- 端末は読み取り後に `shm_unlink` する。毎フレーム新しい名前で作り直す必要がある
-- `p` を省くと `addPlacement` が内部プレースメント ID を採番し続け、フレームごとに
-  placement が積み上がる（`graphics_storage.zig`）。`p=1` を明示して
-  (image id, placement id) を固定すると既存プレースメントを上書きするので、
-  仕様書が想定していた「数百フレームごとの `a=d` 掃除」は不要
-- 同じ image id への再転送は `addImage` が古い画像を解放して置き換える。
-  画像ストレージの上限は既定 320MB で、31.46 MiB の画像 1 枚なら問題にならない
-- `kitty_images` が無効な場合は `q` に関わらず一切応答しない（`graphics_exec.zig`）
+- `t=s` passes the base64-decoded payload straight to `shm_open`, so the name
+  must include the leading `/` (macOS caps `PSHMNAMLEN` at 31 bytes).
+- The terminal calls `shm_unlink` after reading, so every frame needs a new
+  name.
+- Omitting `p` makes `addPlacement` mint a fresh internal placement id each
+  time, and placements accumulate one per frame (`graphics_storage.zig`).
+  Pinning `p=1` makes the (image id, placement id) pair overwrite the existing
+  placement, so no periodic `a=d` sweep is needed.
+- Re-transmitting under the same image id makes `addImage` free the old image
+  and replace it. The image storage limit defaults to 320MB, which a single
+  31.46 MiB image is nowhere near.
+- When `kitty_images` is disabled, nothing is sent back regardless of `q`
+  (`graphics_exec.zig`).
 
-## tmux の扱い
+## tmux
 
-通常の tmux ペイン内で実行すると、tmux が APC を飲み込んでペインタイトルとして
-表示し、Ghostty までコマンドが届かない（矩形は出ず、応答も返らない）。
-本番経路の `lock-command` はクライアントの tty を直接使うためこの影響を受けない。
+Running inside a normal tmux pane, tmux swallows the APC and renders it as a
+pane title; the command never reaches Ghostty, so no image appears and no reply
+comes back. The real path, `lock-command`, talks to the client tty directly and
+is unaffected.
 
-仕様書の段階4のチェック「通常の tmux ペインで矩形が出ないこと」は確認済みで、
-**tmux は KGP を解釈しないため、リサイズ後の再送処理は不要**。
+That also settles the question of whether tmux interprets KGP: **it does not**,
+so no placement needs to be re-sent after a resize.

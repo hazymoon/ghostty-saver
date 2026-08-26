@@ -1,11 +1,12 @@
 import Foundation
 
-/// CPU でグラデーションを描く。段階2で Metal のオフスクリーン描画に置き換わる部分で、
-/// ここを分けておくことで「転送コスト」と「生成コスト」を計測上分離できる。
+/// Draws a gradient on the CPU. In the real renderer this is replaced by an
+/// offscreen Metal pass; keeping it separate lets the measurement split
+/// "transfer cost" from "generation cost".
 struct GradientRenderer {
     let width: Int
     let height: Int
-    /// 列ごとの R 値を先に作っておき、ピクセルループから除算を追い出す。
+    /// Precomputed red value per column, to keep division out of the pixel loop.
     private let columnRed: [UInt32]
 
     init(width: Int, height: Int) {
@@ -15,7 +16,7 @@ struct GradientRenderer {
         self.columnRed = (0..<width).map { UInt32($0 * 255 / denominator) }
     }
 
-    /// RGBA8（リトルエンディアンで byte0=R, byte1=G, byte2=B, byte3=A）で書き込む。
+    /// Writes RGBA8, i.e. little-endian byte0=R, byte1=G, byte2=B, byte3=A.
     func render(into base: UnsafeMutableRawPointer, frame: UInt64) {
         let pixels = base.assumingMemoryBound(to: UInt32.self)
         let blue = UInt32((frame &* 3) & 0xFF) << 16

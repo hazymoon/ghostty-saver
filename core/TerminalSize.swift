@@ -1,7 +1,7 @@
 import Foundation
 import CShim
 
-/// 端末の実ピクセルサイズとセル数。
+/// The terminal's size in pixels and in cells.
 public struct TerminalSize {
     public var pixelWidth: Int
     public var pixelHeight: Int
@@ -28,20 +28,20 @@ public enum TerminalSizeError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .notATTY:
-            return "標準出力が tty ではない（--size WxH で明示指定してください）"
-        case .ioctlFailed(let e):
-            return "TIOCGWINSZ に失敗: errno=\(e) (\(String(cString: strerror(e))))"
+            return "standard output is not a tty (pass --size WxH instead)"
+        case .ioctlFailed(let code):
+            return "TIOCGWINSZ failed: errno=\(code) (\(String(cString: strerror(code))))"
         case .noPixelSize:
-            return "ws_xpixel / ws_ypixel が 0 で、CSI 14 t のフォールバックも失敗した"
+            return "ws_xpixel/ws_ypixel are zero and the CSI 14 t fallback also failed"
         case .csi14tTimeout:
-            return "CSI 14 t の応答が来なかった"
-        case .csi14tUnparsable(let s):
-            return "CSI 14 t の応答を解釈できなかった: \(s.debugDescription)"
+            return "no reply to CSI 14 t"
+        case .csi14tUnparsable(let reply):
+            return "could not parse the CSI 14 t reply: \(reply.debugDescription)"
         }
     }
 }
 
-/// TIOCGWINSZ でサイズを取得する。ws_xpixel/ws_ypixel が 0 のことがある。
+/// Asks the kernel for the size. ws_xpixel/ws_ypixel are sometimes zero.
 public func queryWinsize(fd: Int32) throws -> TerminalSize {
     var ws = winsize()
     guard gs_winsize(fd, &ws) == 0 else {
@@ -55,14 +55,14 @@ public func queryWinsize(fd: Int32) throws -> TerminalSize {
     )
 }
 
-/// `CSI 14 t` を送り `CSI 4 ; height ; width t` の応答を読む。
-/// 呼び出し側が raw モードにしてあることを前提とする。
+/// Sends `CSI 14 t` and reads the `CSI 4 ; height ; width t` reply.
+/// The caller is expected to have put the terminal in raw mode.
 public func queryCSI14t(fd: Int32, timeout: TimeInterval = 0.5) throws -> (width: Int, height: Int) {
     let query = "\u{1b}[14t"
     _ = query.withCString { write(fd, $0, strlen($0)) }
 
     let deadline = Date().addingTimeInterval(timeout)
-    var buf = [UInt8]()
+    var buffer = [UInt8]()
     var byte: UInt8 = 0
 
     while Date() < deadline {
@@ -72,27 +72,27 @@ public func queryCSI14t(fd: Int32, timeout: TimeInterval = 0.5) throws -> (width
         if ready <= 0 { continue }
         let n = read(fd, &byte, 1)
         if n <= 0 { continue }
-        buf.append(byte)
-        // 応答終端は 't'
+        buffer.append(byte)
+        // The reply terminates with 't'.
         if byte == UInt8(ascii: "t") { break }
-        if buf.count > 64 { break }
+        if buffer.count > 64 { break }
     }
 
-    guard !buf.isEmpty else { throw TerminalSizeError.csi14tTimeout }
-    let response = String(decoding: buf, as: UTF8.self)
+    guard !buffer.isEmpty else { throw TerminalSizeError.csi14tTimeout }
+    let reply = String(decoding: buffer, as: UTF8.self)
 
-    // 期待形式: ESC [ 4 ; <height> ; <width> t
-    let numbers = response
+    // Expected form: ESC [ 4 ; <height> ; <width> t
+    let numbers = reply
         .split(whereSeparator: { !$0.isNumber })
         .compactMap { Int($0) }
     guard numbers.count >= 3, numbers[0] == 4 else {
-        throw TerminalSizeError.csi14tUnparsable(response)
+        throw TerminalSizeError.csi14tUnparsable(reply)
     }
     return (width: numbers[2], height: numbers[1])
 }
 
-/// TIOCGWINSZ を第一手段、CSI 14 t をフォールバックとしてピクセルサイズを決める。
-/// CSI 14 t を使う場合だけ一時的に raw モードへ落とす。
+/// Resolves the pixel size, preferring TIOCGWINSZ and falling back to CSI 14 t.
+/// Raw mode is only entered for the fallback, and restored afterwards.
 public func resolveTerminalSize(fd: Int32) throws -> TerminalSize {
     guard isatty(fd) == 1 else { throw TerminalSizeError.notATTY }
 

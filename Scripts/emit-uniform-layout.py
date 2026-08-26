@@ -1,10 +1,10 @@
-"""spirv-cross のリフレクション JSON から uniform ブロックのオフセットを Swift として出す。
+"""Emit the uniform block's byte offsets as Swift, from spirv-cross reflection.
 
-Ghostty の shadertoy_prefix.glsl が定義する Globals ブロックのメンバ名とバイト
-オフセットをそのまま写す。手書きしないことで、prefix を Ghostty の新しい版に
-差し替えたときも自動で追従する。
+Mirrors the member names and offsets of the Globals block declared by Ghostty's
+shadertoy_prefix.glsl. Generating them instead of writing them by hand means
+re-vendoring a newer prefix keeps everything in sync.
 
-build-shaders.sh から呼ばれる。
+Called from build-shaders.sh.
 """
 
 import json
@@ -13,7 +13,7 @@ import sys
 
 def main() -> None:
     if len(sys.argv) != 2:
-        sys.exit("使い方: emit-uniform-layout.py <spirv-cross --reflect の JSON>")
+        sys.exit("usage: emit-uniform-layout.py <spirv-cross --reflect JSON>")
 
     with open(sys.argv[1]) as handle:
         reflection = json.load(handle)
@@ -22,22 +22,22 @@ def main() -> None:
         (u for u in reflection.get("ubos", []) if u.get("name") == "Globals"), None
     )
     if globals_ubo is None:
-        sys.exit("リフレクションに Globals ブロックがありません")
+        sys.exit("no Globals block in the reflection output")
 
     members = reflection["types"][globals_ubo["type"]]["members"]
 
     lines = [
-        "/// Ghostty の shadertoy uniform ブロック（Globals）のバイトオフセット。",
-        "/// shaders/prefix.glsl から spirv-cross のリフレクション経由で生成している。",
+        "/// Byte offsets into Ghostty's shadertoy uniform block (Globals).",
+        "/// Generated from shaders/prefix.glsl via spirv-cross reflection.",
         "public enum ShadertoyUniformLayout {",
-        "    /// uniform バッファ全体のバイト数",
+        "    /// Total size of the uniform buffer.",
         f"    public static let size = {globals_ubo['block_size']}",
     ]
 
     for member in members:
         array = member.get("array")
         if array:
-            comment = f"{member['type']}[{array[0]}] / 要素間隔 {member.get('array_stride')} バイト"
+            comment = f"{member['type']}[{array[0]}], stride {member.get('array_stride')} bytes"
         else:
             comment = member["type"]
         lines.append("")
