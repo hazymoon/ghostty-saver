@@ -119,6 +119,30 @@ GPU render read back through the shared memory mapping, the generated uniform
 offsets, resize handling, and what each shader has to look like. None of it
 needs a terminal.
 
+## Checking for leaks
+
+Re-transmitting a whole frame every 16ms is exactly the workload that leaks if
+an image or a placement is added rather than replaced, so that check is a
+script rather than something to reconstruct by hand:
+
+```sh
+Scripts/check-memory.sh
+```
+
+It points tmux's `lock-command` at the release binary, locks the client,
+samples resident memory for three minutes, stops the screensaver and puts
+`lock-command` back. The screen is covered for the duration; that is the test.
+It refuses to run against a binary older than the sources.
+
+The verdict reports the slope with its own standard error and states how small
+a leak the run could have detected, so a `PASS` can be read for what it is: it
+catches anything carrying real weight per frame, and cannot resolve a few
+hundred bytes against a terminal's own allocation churn. Exit status is 0 for
+flat, 1 for climbing, 2 for not enough samples.
+
+`Scripts/analyze-memory.py --self-test` checks the verdicts against synthetic
+series, so the detector cannot quietly stop detecting.
+
 ## Design notes
 
 `docs/stage1-transport.md` records the measurements that decided the transfer
