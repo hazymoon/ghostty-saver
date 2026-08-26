@@ -139,11 +139,16 @@ is a faithful test. The locked client is unusable until the run finishes, and a
 keypress ends the screensaver early - which the script detects and reports
 rather than passing off a truncated run.
 
-To keep working, give a second Ghostty window over to the run:
+To keep working, give a second Ghostty window over to the run. `--client` needs
+a client that already exists, so make one first:
 
 ```sh
-tmux list-clients -F '#{client_name}'
-Scripts/check-memory.sh --client /dev/ttys00N
+# in a new Ghostty window, on a session of its own
+tmux new -s saver-test
+
+# back in the window you are working in
+tmux list-clients -F '#{client_name}'   # now lists two
+Scripts/check-memory.sh --client <the new one>
 ```
 
 That is still a valid test of the screensaver, but a worse measurement: every

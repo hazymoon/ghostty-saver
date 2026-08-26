@@ -76,6 +76,12 @@ if [ "$drive" -eq 1 ]; then
     if [ -n "$client" ] && ! tmux list-clients -F '#{client_name}' 2> /dev/null | grep -qx "$client"; then
         echo "no tmux client named $client." >&2
         echo "clients: $(tmux list-clients -F '#{client_name}' 2> /dev/null | tr '\n' ' ')" >&2
+        if [ "$(tmux list-clients 2> /dev/null | wc -l | tr -d ' ')" -le 1 ]; then
+            echo >&2
+            echo "there is only one client, so there is no other one to lock." >&2
+            echo "open a second Ghostty window and run 'tmux new -s saver-test' in it," >&2
+            echo "then pass the client name that appears in tmux list-clients." >&2
+        fi
         exit 1
     fi
     if [ ! -x "$binary" ]; then
