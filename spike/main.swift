@@ -17,6 +17,8 @@ struct Options {
     var sinkPath: String?
     var useAltScreen = true
     var ackTimeout: Double = 2.0
+    /// 最終フレームを表示したままキー入力を待つ（表示確認用）
+    var hold = false
 }
 
 let usage = """
@@ -25,7 +27,8 @@ let usage = """
   --size WxH        端末に問い合わせず解像度を明示する（tty が無い環境での計測用）
   --seconds N       計測秒数（既定 5）
   --frames N        フレーム数を指定する。--seconds より優先
-  --once            1 フレームだけ送って終了する（表示確認用）
+  --once            1 フレームだけ送り、キーを押すまで表示したままにする
+  --hold            計測後、キーを押すまで最終フレームを表示したままにする
   --quiet-level N   0=応答あり（既定・端末の消化速度で律速）, 1=エラーのみ, 2=応答なし
   --sink PATH       tty ではなく指定パスへ書く（write(2) 以外のコストだけを測る）
   --no-alt-screen   代替画面へ切り替えない
@@ -69,6 +72,9 @@ func parseOptions() -> Options {
             options.maxFrames = Int(nextValue(argument))
         case "--once":
             options.maxFrames = 1
+            options.hold = true
+        case "--hold":
+            options.hold = true
         case "--quiet-level":
             let value = Int(nextValue(argument)) ?? 0
             options.quiet = QuietLevel(rawValue: value) ?? .verbose
@@ -274,6 +280,15 @@ while true {
 }
 
 let elapsed = monotonicNow() - loopStart
+
+// 後始末は画像削除と代替画面終了を含むので、表示確認したいときはその前で待つ。
+if options.hold && outputIsTTY && !stoppedByUser {
+    var pfd = pollfd(fd: gOutputFD, events: Int16(POLLIN), revents: 0)
+    _ = poll(&pfd, 1, -1)
+    var discard: UInt8 = 0
+    _ = read(gOutputFD, &discard, 1)
+}
+
 restoreTerminal()
 
 // MARK: - 報告
