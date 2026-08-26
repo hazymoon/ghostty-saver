@@ -233,8 +233,8 @@ var renderSamples = Samples()
 var writeSamples = Samples()
 var ackSamples = Samples()
 
-let frameInterval = options.targetFPS > 0 ? 1 / options.targetFPS : 0
 let startedAt = monotonicNow()
+var pacer = FramePacer(targetFPS: options.targetFPS, now: startedAt)
 var frameIndex: UInt64 = 0
 var stopped = false
 
@@ -322,14 +322,14 @@ while !stopped {
         }
     }
 
-    // Sleep off whatever is left of the target frame interval.
-    if frameInterval > 0 {
-        let remaining = frameInterval - (monotonicNow() - frameStart)
-        if remaining > 0 { usleep(useconds_t(remaining * 1_000_000)) }
-    }
+    let wait = pacer.sleepInterval(now: monotonicNow())
+    if wait > 0 { usleep(useconds_t(wait * 1_000_000)) }
 }
 
 let elapsed = monotonicNow() - startedAt
+
+// The reply to the last frame is still unread when a keypress ends the loop.
+TerminalSession.discardPendingInput()
 TerminalSession.restore()
 
 if options.stats {

@@ -79,6 +79,24 @@ public enum TerminalSession {
         return true
     }
 
+    /// Reads and throws away whatever the terminal has already sent.
+    ///
+    /// Exiting on a keypress leaves the last frame's reply unread. restore()
+    /// flushes the queue as it restores termios, but a reply that has not
+    /// arrived yet would survive that, so the normal exit path drains first.
+    /// Not for use from a signal handler.
+    public static func discardPendingInput(for duration: TimeInterval = 0.05) {
+        var chunk = [UInt8](repeating: 0, count: 256)
+        let deadline = monotonicNow() + duration
+        while monotonicNow() < deadline {
+            var pfd = pollfd(fd: outputDescriptor, events: Int16(POLLIN), revents: 0)
+            let remainingMs = Int32(max(0, (deadline - monotonicNow()) * 1000))
+            if poll(&pfd, 1, remainingMs) <= 0 { break }
+            let n = chunk.withUnsafeMutableBytes { read(outputDescriptor, $0.baseAddress, $0.count) }
+            if n <= 0 { break }
+        }
+    }
+
     /// Enters raw mode, configured to return as soon as one byte is available.
     public static func enterRawMode() {
         var raw = termios()
@@ -111,7 +129,10 @@ public enum TerminalSession {
         write(sequence)
 
         if termiosSaved {
-            tcsetattr(outputDescriptor, TCSANOW, &originalTermios)
+            // TCSAFLUSH rather than TCSANOW: the reply to the last frame is
+            // usually still sitting unread in the input queue, and anything
+            // left there lands on the shell prompt as stray text.
+            tcsetattr(outputDescriptor, TCSAFLUSH, &originalTermios)
         }
         unlinkTrackedShm()
     }
