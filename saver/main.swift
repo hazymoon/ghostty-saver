@@ -21,6 +21,8 @@ struct Options {
     var quiet: QuietLevel = .verbose
     var shaderName: String?
     var verify = false
+    var dumpPath: String?
+    var dumpTime: Double = 0
     var stats = false
 }
 
@@ -36,6 +38,8 @@ usage: ghostty-saver [options]
   --fps N           target frame rate (default 60, 0 for uncapped)
   --quiet-level N   0=replies on (default), 1=errors only, 2=no replies
   --verify          render one frame without a terminal and check shared memory
+  --dump PATH       with --verify, also write the frame to PATH as a PNG
+  --at SECONDS      with --dump, the iTime to render at (default 0)
   --stats           print a per-frame breakdown on exit
   -h, --help        show this message
 """
@@ -78,6 +82,11 @@ func parseOptions() -> Options {
             options.quiet = QuietLevel(rawValue: Int(nextValue(argument)) ?? 0) ?? .verbose
         case "--verify":
             options.verify = true
+        case "--dump":
+            options.dumpPath = nextValue(argument)
+            options.verify = true
+        case "--at":
+            options.dumpTime = Double(nextValue(argument)) ?? 0
         case "--stats":
             options.stats = true
         default:
@@ -127,14 +136,14 @@ func makeRenderer(program: ShaderProgram, width: Int, height: Int) -> MetalRende
 // MARK: - Verification
 
 /// Renders without a terminal and reads the result straight out of shared memory.
-func runVerify(program: ShaderProgram, width: Int, height: Int) -> Never {
+func runVerify(program: ShaderProgram, width: Int, height: Int, dumpPath: String?, time: Double) -> Never {
     prepareShmTracking()
     let renderer = makeRenderer(program: program, width: width, height: height)
 
     guard var state = ShadertoyState(device: renderer.device, width: renderer.width, height: renderer.height) else {
         fail("could not allocate the uniform buffer")
     }
-    state.update(time: 0, frame: 0, frameRate: 0)
+    state.update(time: Float(time), frame: 0, frameRate: 60)
 
     report("device        : \(renderer.device.name)")
     report("shader        : \(program.name) (entry point \(program.entryPoint))")
@@ -159,6 +168,18 @@ func runVerify(program: ShaderProgram, width: Int, height: Int) -> Never {
         report("shared memory contents (RGBA)")
         report("  top-left \(pixel(0, 0))  top-right \(pixel(renderer.width - 1, 0))")
         report("  bottom-left \(pixel(0, renderer.height - 1))  bottom-right \(pixel(renderer.width - 1, renderer.height - 1))")
+
+        if let dumpPath {
+            try FrameDump.writePNG(
+                pixels: frame.base,
+                width: renderer.width,
+                height: renderer.height,
+                bytesPerRow: renderer.bytesPerRow,
+                to: dumpPath
+            )
+            report("wrote \(dumpPath)")
+        }
+
         frame.closeMapping()
     } catch {
         fail("\(error)")
@@ -175,7 +196,7 @@ let program = selectShader(named: options.shaderName)
 
 if options.verify {
     let size = options.explicitSize ?? (width: 1920, height: 1080)
-    runVerify(program: program, width: size.width, height: size.height)
+    runVerify(program: program, width: size.width, height: size.height, dumpPath: options.dumpPath, time: options.dumpTime)
 }
 
 let outputIsTTY = TerminalSession.openOutput(sinkPath: nil)

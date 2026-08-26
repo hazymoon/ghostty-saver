@@ -165,6 +165,197 @@ fragment main0_out main0(constant Globals& _38 [[buffer(1)]], float4 gl_FragCoor
 }
 """#
     )
+    /// Generated from shaders/matrix.glsl
+    public static let matrix = ShaderProgram(
+        name: "matrix",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+// Implementation of the GLSL mod() function, which is slightly different than Metal fmod()
+template<typename Tx, typename Ty>
+inline Tx mod(Tx x, Ty y)
+{
+    return x - y * floor(x / y);
+}
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float hash11(thread const float& n)
+{
+    return fract(sin(n) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float hash31(thread const float3& p)
+{
+    return fract(sin(dot(p, float3(127.09999847412109375, 311.70001220703125, 74.6999969482421875))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float glyphMask(thread const float2& cellUV, thread const float& seed)
+{
+    float2 inner = (cellUV - float2(0.1599999964237213134765625, 0.100000001490116119384765625)) / float2(0.680000007152557373046875, 0.800000011920928955078125);
+    bool _94 = inner.x < 0.0;
+    bool _102;
+    if (!_94)
+    {
+        _102 = inner.x > 1.0;
+    }
+    else
+    {
+        _102 = _94;
+    }
+    bool _110;
+    if (!_102)
+    {
+        _110 = inner.y < 0.0;
+    }
+    else
+    {
+        _110 = _102;
+    }
+    bool _117;
+    if (!_110)
+    {
+        _117 = inner.y > 1.0;
+    }
+    else
+    {
+        _117 = _110;
+    }
+    if (_117)
+    {
+        return 0.0;
+    }
+    float2 bit = floor(inner * float2(3.0, 5.0));
+    float3 param = float3(bit, seed);
+    return step(0.5, hash31(param));
+}
+
+static inline __attribute__((always_inline))
+float3 rainLayer(thread const float2& fragCoord, thread const float& z, thread const float& layerSeed, constant Globals& _199)
+{
+    float cellHeight = 26.0 * z;
+    float cellWidth = cellHeight * 0.62000000476837158203125;
+    float2 grid = float2(fragCoord.x / cellWidth, fragCoord.y / cellHeight);
+    float2 cell = floor(grid);
+    float2 cellUV = fract(grid);
+    float2 param = float2(cell.x, layerSeed);
+    float columnSeed = hash21(param);
+    float param_1 = columnSeed * 7.309999942779541015625;
+    float speed = (7.0 + (16.0 * hash11(param_1))) * z;
+    float param_2 = columnSeed * 13.770000457763671875;
+    float phase = hash11(param_2) * 900.0;
+    float rows = _199.iResolution[1u] / cellHeight;
+    float travelled = (_199.iTime * speed) + phase;
+    float roughCycle = rows * 2.400000095367431640625;
+    float pass = floor(travelled / roughCycle);
+    float2 param_3 = float2(columnSeed * 61.0, pass);
+    float dropSeed = hash21(param_3);
+    float trailLength = 7.0 + (20.0 * dropSeed);
+    float param_4 = dropSeed * 17.299999237060546875;
+    float gap = rows * (0.60000002384185791015625 + (1.39999997615814208984375 * hash11(param_4)));
+    float head = mod(travelled, (rows + trailLength) + gap);
+    float behindHead = head - cell.y;
+    if ((behindHead < 0.0) || (behindHead > trailLength))
+    {
+        return float3(0.0);
+    }
+    float fade = exp((-behindHead) / (trailLength * 0.300000011920928955078125));
+    float param_5 = columnSeed * 5.110000133514404296875;
+    float flickerRate = 5.0 + (9.0 * hash11(param_5));
+    float glyphSeed = ((floor(_199.iTime * flickerRate) + (cell.y * 17.0)) + layerSeed) + (pass * 7.0);
+    float3 param_6 = float3(cell, glyphSeed);
+    float2 param_7 = cellUV;
+    float param_8 = hash31(param_6) * 128.0;
+    float mask = glyphMask(param_7, param_8);
+    if (mask <= 0.0)
+    {
+        return float3(0.0);
+    }
+    float headness = smoothstep(2.2000000476837158203125, 0.0, behindHead);
+    float3 color = mix(float3(0.0, 0.949999988079071044921875, 0.319999992847442626953125), float3(0.7799999713897705078125, 1.0, 0.85000002384185791015625), float3(headness));
+    float glow = 1.0 + ((1.60000002384185791015625 * headness) * headness);
+    return ((color * fade) * glow) * mix(0.2199999988079071044921875, 1.0, z);
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _199)
+{
+    float3 color = float3(0.0);
+    for (int layer = 0; layer < 3; layer++)
+    {
+        float t = float(layer) / 2.0;
+        float z = mix(0.4000000059604644775390625, 1.0, t);
+        float2 param = fragCoord;
+        float param_1 = z;
+        float param_2 = float(layer) * 37.0;
+        color += rainLayer(param, param_1, param_2, _199);
+    }
+    color += float3(0.0, 0.009499999694526195526123046875, 0.00319999991916120052337646484375);
+    float2 uv = fragCoord / float2(_199.iResolution[0], _199.iResolution[1]);
+    float vignette = smoothstep(1.14999997615814208984375, 0.300000011920928955078125, length(uv - float2(0.5)));
+    fragColor = float4(color * vignette, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _199 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _199);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
     /// Every converted shader, for selecting one by name.
-    public static let all: [ShaderProgram] = [gradient]
+    public static let all: [ShaderProgram] = [gradient, matrix]
 }
