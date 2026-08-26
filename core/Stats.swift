@@ -10,11 +10,14 @@ import Foundation
 /// Count, sum, mean and maximum stay exact. Percentiles land within one bucket,
 /// which is well inside what a per-frame timing report needs to say.
 public struct Samples {
-    /// 0.05 ms per bucket, covering up to 100 ms. Anything slower than that is
-    /// already a stall rather than a frame time, and the exact maximum is kept
-    /// separately.
-    private static let bucketSeconds = 0.000_05
-    private static let bucketCount = 2000
+    /// Logarithmic buckets, so the resolution is relative rather than
+    /// absolute. Linear buckets sized for a 10 ms frame collapse everything
+    /// below one bucket to the same value, which made a 0.011 ms mean report a
+    /// 0.025 ms median. These hold every value to within 2 percent from a
+    /// microsecond to ten seconds, in fewer than a thousand buckets.
+    private static let smallestSeconds = 0.000_001
+    private static let growthPerBucket = 1.02
+    private static let bucketCount = 815
 
     private var buckets = [Int](repeating: 0, count: bucketCount)
     private var beyondRange = 0
@@ -30,8 +33,12 @@ public struct Samples {
         sum += seconds
         if seconds > maximum { maximum = seconds }
 
-        let index = Int(seconds / Self.bucketSeconds)
-        if index >= 0 && index < Self.bucketCount {
+        guard seconds > Self.smallestSeconds else {
+            buckets[0] += 1
+            return
+        }
+        let index = Int(log(seconds / Self.smallestSeconds) / log(Self.growthPerBucket))
+        if index < Self.bucketCount {
             buckets[index] += 1
         } else {
             beyondRange += 1
@@ -44,7 +51,7 @@ public struct Samples {
 
     public var mean: Double { count == 0 ? 0 : sum / Double(count) }
 
-    /// Accurate to one bucket. A percentile of 1 returns the exact maximum.
+    /// Accurate to 2 percent. A percentile of 1 returns the exact maximum.
     public func percentile(_ p: Double) -> Double {
         guard count > 0 else { return 0 }
         if p >= 1 { return maximum }
@@ -54,7 +61,9 @@ public struct Samples {
         for (index, bucket) in buckets.enumerated() where bucket > 0 {
             seen += bucket
             if seen > target {
-                return (Double(index) + 0.5) * Self.bucketSeconds
+                // Geometric midpoint, since the bucket is a ratio not a span.
+                let lower = Self.smallestSeconds * pow(Self.growthPerBucket, Double(index))
+                return lower * sqrt(Self.growthPerBucket)
             }
         }
         // Everything past the histogram's range; the maximum is the only exact

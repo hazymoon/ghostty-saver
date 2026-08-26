@@ -117,8 +117,12 @@ struct UniformTests {
 
 @Suite("sample statistics")
 struct SamplesTests {
-    /// One bucket of the histogram, which is what percentiles are accurate to.
-    private let tolerance = 0.000_05
+    /// The histogram's buckets are ratios, so accuracy is relative.
+    private let relativeTolerance = 0.02
+
+    private func isClose(_ actual: Double, _ expected: Double) -> Bool {
+        abs(actual - expected) <= expected * relativeTolerance
+    }
 
     @Test("an empty series reports zeroes instead of dividing by zero")
     func emptySeries() {
@@ -145,8 +149,8 @@ struct SamplesTests {
         var samples = Samples()
         for value in [0.005, 0.001, 0.003, 0.002, 0.004] { samples.append(value) }
 
-        #expect(abs(samples.percentile(0.5) - 0.003) <= tolerance)
-        #expect(abs(samples.percentile(0) - 0.001) <= tolerance)
+        #expect(isClose(samples.percentile(0.5), 0.003))
+        #expect(isClose(samples.percentile(0), 0.001))
         #expect(samples.percentile(1.0) == 0.005)
     }
 
@@ -158,7 +162,7 @@ struct SamplesTests {
         #expect(samples.percentile(0) <= samples.percentile(0.5))
         #expect(samples.percentile(0.5) <= samples.percentile(0.95))
         #expect(samples.percentile(0.95) <= samples.percentile(1.0))
-        #expect(abs(samples.percentile(0.5) - 0.05) <= tolerance)
+        #expect(isClose(samples.percentile(0.5), 0.05))
     }
 
     /// A stall longer than the histogram covers must not be lost or reported
@@ -167,12 +171,28 @@ struct SamplesTests {
     func outOfRangeValue() {
         var samples = Samples()
         for _ in 0..<99 { samples.append(0.001) }
-        samples.append(5.0)
+        samples.append(60.0)
 
-        #expect(samples.maximum == 5.0)
+        #expect(samples.maximum == 60.0)
         #expect(samples.count == 100)
-        #expect(abs(samples.percentile(0.5) - 0.001) <= tolerance)
-        #expect(samples.summaryMilliseconds().contains("5000.000"))
+        #expect(isClose(samples.percentile(0.5), 0.001))
+        #expect(samples.summaryMilliseconds().contains("60000.000"))
+    }
+
+    /// Sub-millisecond series are the ones linear buckets ruined: every
+    /// percentile collapsed to the same value, and the median came out larger
+    /// than the mean.
+    @Test("percentiles stay meaningful well below a millisecond")
+    func resolvesFastSeries() {
+        var samples = Samples()
+        for value in [0.000_008, 0.000_011, 0.000_012, 0.000_025, 0.000_127] {
+            samples.append(value)
+        }
+
+        #expect(isClose(samples.percentile(0.5), 0.000_012))
+        #expect(samples.percentile(0) < samples.percentile(0.5))
+        #expect(samples.percentile(0.5) < samples.percentile(0.95))
+        #expect(samples.percentile(0.5) <= samples.mean)
     }
 
     /// The point of the histogram: the series does not get bigger as frames go
