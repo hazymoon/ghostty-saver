@@ -31,7 +31,7 @@ let availableShaders = GeneratedShaders.all.map(\.name).joined(separator: ", ")
 let usage = """
 usage: ghostty-saver [options]
 
-  --shader NAME     which shader to use (default: the first). available: \(availableShaders)
+  --shader NAME     which shader to use (default: \(ShaderCatalog.defaultName)). available: \(availableShaders)
   --size WxH        state the resolution instead of asking the terminal
   --seconds N       stop after N seconds (default: run until a key is pressed)
   --frames N        stop after N frames
@@ -108,14 +108,11 @@ func report(_ text: String) {
 }
 
 func selectShader(named name: String?) -> ShaderProgram {
-    guard let name else {
-        guard let first = GeneratedShaders.all.first else {
-            fail("no shaders were generated; run Scripts/build-shaders.sh")
-        }
-        return first
+    guard !GeneratedShaders.all.isEmpty else {
+        fail("no shaders were generated; run Scripts/build-shaders.sh")
     }
-    guard let program = GeneratedShaders.all.first(where: { $0.name == name }) else {
-        fail("no shader named \(name); available: \(availableShaders)")
+    guard let program = ShaderCatalog.select(named: name, from: GeneratedShaders.all) else {
+        fail("no shader named \(name ?? ShaderCatalog.defaultName); available: \(availableShaders)")
     }
     return program
 }

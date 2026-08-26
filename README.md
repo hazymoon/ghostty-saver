@@ -47,7 +47,7 @@ that is the supported path.
 ```
 ghostty-saver [options]
 
-  --shader NAME     which shader to use (default: the first)
+  --shader NAME     which shader to use (default: matrix)
   --size WxH        state the resolution instead of asking the terminal
   --seconds N       stop after N seconds (default: run until a key is pressed)
   --frames N        stop after N frames
