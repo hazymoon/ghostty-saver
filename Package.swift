@@ -13,5 +13,10 @@ let package = Package(
             dependencies: ["SaverCore"],
             path: "spike"
         ),
+        .executableTarget(
+            name: "ghostty-saver",
+            dependencies: ["SaverCore"],
+            path: "saver"
+        ),
     ]
 )

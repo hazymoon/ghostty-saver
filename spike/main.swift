@@ -96,44 +96,10 @@ func parseOptions() -> Options {
     return options
 }
 
-// MARK: - 端末状態の復帰
-
-// シグナルハンドラから触るためグローバルに置く。
-var gOutputFD: Int32 = STDOUT_FILENO
-var gOriginalTermios = termios()
-var gTermiosSaved = false
-var gAltScreenEntered = false
-var gRestored = false
-
-/// 画像削除 → カーソル表示 → 代替画面終了 → termios 復帰 → shm 回収。
-/// atexit / シグナルハンドラ / 正常終了のいずれからでも安全に呼べる。
-func restoreTerminal() {
-    if gRestored { return }
-    gRestored = true
-
-    var sequence = "\u{1b}_Ga=d,d=A\u{1b}\\\u{1b}[?25h"
-    if gAltScreenEntered { sequence += "\u{1b}[?1049l" }
-    _ = sequence.withCString { write(gOutputFD, $0, strlen($0)) }
-
-    if gTermiosSaved {
-        tcsetattr(gOutputFD, TCSANOW, &gOriginalTermios)
-    }
-    unlinkTrackedShm()
-}
-
-func installSignalHandlers() {
-    let handler: @convention(c) (Int32) -> Void = { signalNumber in
-        restoreTerminal()
-        signal(signalNumber, SIG_DFL)
-        raise(signalNumber)
-    }
-    signal(SIGINT, handler)
-    signal(SIGTERM, handler)
-    signal(SIGHUP, handler)
-}
+// MARK: - 起動時の異常終了
 
 func fail(_ message: String) -> Never {
-    restoreTerminal()
+    TerminalSession.restore()
     FileHandle.standardError.write(Data("spike: \(message)\n".utf8))
     exit(1)
 }
@@ -143,18 +109,7 @@ func fail(_ message: String) -> Never {
 let options = parseOptions()
 
 // 出力先の決定。stdout がリダイレクトされていても /dev/tty があればそちらを使う。
-if let sinkPath = options.sinkPath {
-    let fd = open(sinkPath, O_WRONLY)
-    guard fd >= 0 else { fail("--sink \(sinkPath) を開けません: \(String(cString: strerror(errno)))") }
-    gOutputFD = fd
-} else if isatty(STDOUT_FILENO) == 1 {
-    gOutputFD = STDOUT_FILENO
-} else {
-    let fd = open("/dev/tty", O_RDWR)
-    gOutputFD = fd >= 0 ? fd : STDOUT_FILENO
-}
-
-let outputIsTTY = isatty(gOutputFD) == 1
+let outputIsTTY = TerminalSession.openOutput(sinkPath: options.sinkPath)
 
 // tty でなければ応答は読めないので q=2 に落とし、解像度も明示指定が要る。
 var quiet = options.quiet
@@ -167,7 +122,7 @@ if let explicit = options.explicitSize {
     size = TerminalSize(pixelWidth: explicit.width, pixelHeight: explicit.height, columns: 0, rows: 0)
 } else {
     do {
-        size = try resolveTerminalSize(fd: gOutputFD)
+        size = try resolveTerminalSize(fd: TerminalSession.outputFD)
     } catch {
         fail("端末サイズを取得できません: \(error)")
     }
@@ -177,40 +132,26 @@ let width = size.pixelWidth
 let height = size.pixelHeight
 let payloadBytes = width * height * 4
 
-prepareShmTracking()
-installSignalHandlers()
-atexit { restoreTerminal() }
+TerminalSession.prepare()
 
 if outputIsTTY {
-    var raw = termios()
-    if tcgetattr(gOutputFD, &raw) == 0 {
-        gOriginalTermios = raw
-        gTermiosSaved = true
-        cfmakeraw(&raw)
-        // 1 バイトでも来たら返す。フレームループを止めないため待ち時間は 0。
-        raw.c_cc.16 = 1   // VMIN
-        raw.c_cc.17 = 0   // VTIME
-        tcsetattr(gOutputFD, TCSANOW, &raw)
-    }
-    if options.useAltScreen {
-        _ = "\u{1b}[?1049h".withCString { write(gOutputFD, $0, strlen($0)) }
-        gAltScreenEntered = true
-    }
-    _ = "\u{1b}[?25l".withCString { write(gOutputFD, $0, strlen($0)) }
+    TerminalSession.enterRawMode()
+    if options.useAltScreen { TerminalSession.enterAltScreen() }
+    TerminalSession.hideCursor()
 }
 
 if options.probe {
     guard outputIsTTY else { fail("--probe は tty が必要です") }
-    runProbe(fd: gOutputFD, size: size)
-    restoreTerminal()
+    runProbe(fd: TerminalSession.outputFD, size: size)
+    TerminalSession.restore()
     exit(0)
 }
 
 // MARK: - 計測ループ
 
-let transport = KittySharedMemoryTransport(fd: gOutputFD, width: width, height: height, quiet: quiet)
+let transport = KittySharedMemoryTransport(fd: TerminalSession.outputFD, width: width, height: height, quiet: quiet)
 let renderer = GradientRenderer(width: width, height: height)
-let reader = outputIsTTY ? ResponseReader(fd: gOutputFD) : nil
+let reader = outputIsTTY ? ResponseReader(fd: TerminalSession.outputFD) : nil
 
 var shmCreateSamples = Samples()   // shm_open + ftruncate
 var fillSamples = Samples()        // グラデーション書き込み
@@ -284,10 +225,10 @@ while true {
         if stoppedByUser || ackFailure != nil { break }
     } else if outputIsTTY {
         // 応答なしモードでもキー入力での中断は受け付ける。
-        var pfd = pollfd(fd: gOutputFD, events: Int16(POLLIN), revents: 0)
+        var pfd = pollfd(fd: TerminalSession.outputFD, events: Int16(POLLIN), revents: 0)
         if poll(&pfd, 1, 0) > 0 {
             var discard: UInt8 = 0
-            if read(gOutputFD, &discard, 1) > 0 { stoppedByUser = true; break }
+            if read(TerminalSession.outputFD, &discard, 1) > 0 { stoppedByUser = true; break }
         }
     }
 }
@@ -296,13 +237,13 @@ let elapsed = monotonicNow() - loopStart
 
 // 後始末は画像削除と代替画面終了を含むので、表示確認したいときはその前で待つ。
 if options.hold && outputIsTTY && !stoppedByUser {
-    var pfd = pollfd(fd: gOutputFD, events: Int16(POLLIN), revents: 0)
+    var pfd = pollfd(fd: TerminalSession.outputFD, events: Int16(POLLIN), revents: 0)
     _ = poll(&pfd, 1, -1)
     var discard: UInt8 = 0
-    _ = read(gOutputFD, &discard, 1)
+    _ = read(TerminalSession.outputFD, &discard, 1)
 }
 
-restoreTerminal()
+TerminalSession.restore()
 
 // MARK: - 報告
 
