@@ -175,7 +175,9 @@ approach, along with the Ghostty implementation details the design depends on:
 why every frame needs a fresh shared memory name, why a placement id must be
 pinned, and how tmux behaves.
 
-## Attribution
+## License
+
+MIT. See `LICENSE`.
 
 The build fetches `src/renderer/shaders/shadertoy_prefix.glsl` from
 [Ghostty](https://github.com/ghostty-org/ghostty) (MIT License) to compile

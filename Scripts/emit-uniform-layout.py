@@ -2,7 +2,7 @@
 
 Mirrors the member names and offsets of the Globals block declared by Ghostty's
 shadertoy_prefix.glsl. Generating them instead of writing them by hand means
-re-vendoring a newer prefix keeps everything in sync.
+moving the pinned reference keeps everything in sync on its own.
 
 Called from build-shaders.sh.
 """

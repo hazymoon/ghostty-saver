@@ -8,8 +8,8 @@ import Testing
 @Suite("Shadertoy uniforms")
 struct UniformTests {
     /// The layout is generated from spirv-cross reflection. These checks exist
-    /// so that re-vendoring a newer prefix cannot silently move a member out
-    /// from under the writers in ShadertoyState.
+    /// so that moving the pinned prefix reference cannot silently move a member
+    /// out from under the writers in ShadertoyState.
     @Test("the generated layout covers every member the shaders rely on")
     func layoutIsComplete() {
         let offsets = [
