@@ -24,4 +24,10 @@ static inline int gs_shm_create(const char *name) {
     return shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0600);
 }
 
+/// Opens an existing segment read-only. Used to observe whether a name is still
+/// present; shm_open is variadic, so Swift cannot call it directly.
+static inline int gs_shm_open_readonly(const char *name) {
+    return shm_open(name, O_RDONLY, 0);
+}
+
 #endif

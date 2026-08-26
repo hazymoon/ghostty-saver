@@ -136,6 +136,12 @@ public struct ShmFrame {
         munmap(base, mappedBytes)
         close(fd)
     }
+
+    /// Removes the segment by name. Only call this once the frame is known to
+    /// be finished with - the terminal cannot read a segment that is gone.
+    public func unlink() {
+        name.withCString { _ = shm_unlink($0) }
+    }
 }
 
 /// Builds a shared memory name. The pid and counter are base36-encoded to stay

@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.0
 import PackageDescription
 
 let package = Package(
@@ -9,7 +9,7 @@ let package = Package(
         // MSL that Scripts/build-shaders.sh generates from shaders/*.glsl.
         .target(name: "GeneratedShaders", path: "Generated"),
         // Transfer and terminal handling shared by the spike and the saver.
-        .target(name: "SaverCore", dependencies: ["CShim"], path: "core"),
+        .target(name: "SaverCore", dependencies: ["CShim", "GeneratedShaders"], path: "core"),
         .executableTarget(
             name: "spike",
             dependencies: ["SaverCore"],
@@ -20,5 +20,11 @@ let package = Package(
             dependencies: ["SaverCore", "GeneratedShaders"],
             path: "saver"
         ),
-    ]
+        .testTarget(
+            name: "SaverCoreTests",
+            dependencies: ["SaverCore", "GeneratedShaders", "CShim"],
+            path: "Tests/SaverCoreTests"
+        ),
+    ],
+    swiftLanguageModes: [.v5]
 )

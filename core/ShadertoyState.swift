@@ -1,7 +1,6 @@
 import Foundation
 import GeneratedShaders
 import Metal
-import SaverCore
 
 /// Keeps Ghostty's uniform block up to date, one write per frame.
 ///
@@ -11,14 +10,14 @@ import SaverCore
 /// Cursor, palette and foreground/background colors mean nothing here because
 /// there is no terminal state to report, so they stay zero. The same .glsl
 /// running under Ghostty gets the real values from Ghostty.
-struct ShadertoyState {
-    let uniforms: UniformBuffer
+public struct ShadertoyState {
+    public let uniforms: UniformBuffer
 
     private let width: Float
     private let height: Float
     private var previousTime: Float = 0
 
-    init?(device: MTLDevice, width: Int, height: Int) {
+    public init?(device: MTLDevice, width: Int, height: Int) {
         guard let uniforms = UniformBuffer(device: device, byteCount: ShadertoyUniformLayout.size) else {
             return nil
         }
@@ -32,7 +31,7 @@ struct ShadertoyState {
         uniforms.set(Int32(0), at: ShadertoyUniformLayout.iCursorVisible)
     }
 
-    mutating func update(time: Float, frame: Int, frameRate: Float) {
+    public mutating func update(time: Float, frame: Int, frameRate: Float) {
         uniforms.set(time, at: ShadertoyUniformLayout.iTime)
         uniforms.set(time - previousTime, at: ShadertoyUniformLayout.iTimeDelta)
         uniforms.set(frameRate, at: ShadertoyUniformLayout.iFrameRate)
