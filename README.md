@@ -131,8 +131,20 @@ Scripts/check-memory.sh
 
 It points tmux's `lock-command` at the release binary, locks the client,
 samples resident memory for three minutes, stops the screensaver and puts
-`lock-command` back. The screen is covered for the duration; that is the test.
-It refuses to run against a binary older than the sources.
+`lock-command` back. It refuses to run against a binary older than the sources.
+
+**It locks the tmux client it runs in.** That client is unusable until the run
+finishes, and a keypress ends the screensaver early - which the script detects
+and reports rather than passing a truncated run. Either run it from a session
+you can leave alone, or drive it yourself:
+
+```sh
+# in a Ghostty window that is not attached to tmux
+.build/release/ghostty-saver --stats
+
+# meanwhile, from anywhere
+Scripts/check-memory.sh --no-drive
+```
 
 The verdict reports the slope with its own standard error and states how small
 a leak the run could have detected, so a `PASS` can be read for what it is: it

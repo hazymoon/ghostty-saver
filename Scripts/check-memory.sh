@@ -8,8 +8,13 @@
 #
 #   By default it drives the whole thing: points tmux's lock-command at the
 #   release binary, locks the client, samples resident memory while the
-#   screensaver runs, stops it, and puts lock-command back the way it was. The
-#   screen is covered for the duration; that is the test.
+#   screensaver runs, stops it, and puts lock-command back the way it was.
+#
+#   THIS LOCKS THE TMUX CLIENT IT RUNS IN. That client is unusable for the
+#   whole duration, and pressing a key ends the screensaver early. Run it from
+#   a tmux session you can leave alone, or use --no-drive and start the
+#   screensaver yourself in a separate Ghostty window that is not attached to
+#   tmux.
 #
 #   Sampling starts before the lock, so the warmup period is visible in the log
 #   rather than being guessed at.
@@ -24,6 +29,7 @@
 #
 # @exitcode 0 memory is flat
 # @exitcode 1 memory climbed, or the run could not be set up
+# @exitcode 2 not enough samples, or the screensaver exited before the end
 
 set -euo pipefail
 
@@ -80,7 +86,7 @@ cleanup() {
     restored=1
 
     if [ "$drive" -eq 1 ]; then
-        pkill -f "$binary" 2> /dev/null || true
+        pkill -x ghostty-saver 2> /dev/null || true
         if [ -n "$previous_lock_command" ]; then
             tmux set -g lock-command "$previous_lock_command"
         else
@@ -96,6 +102,11 @@ if [ "$drive" -eq 1 ]; then
 fi
 
 echo "sampling every ${interval}s for ${duration}s (Ghostty pid $terminal_pid)"
+if [ "$drive" -eq 1 ]; then
+    echo "this tmux client is locked until the run finishes; pressing a key ends it early"
+else
+    echo "--no-drive: start the screensaver yourself; this cannot check which build is running"
+fi
 echo "# elapsed_seconds	ghostty_rss_kb	saver_rss_kb" > "$samples"
 
 if [ "$drive" -eq 1 ]; then
@@ -105,6 +116,9 @@ if [ "$drive" -eq 1 ]; then
 fi
 
 started_at="$(date +%s)"
+saver_seen=0
+truncated=0
+
 while true; do
     elapsed=$(( $(date +%s) - started_at ))
     [ "$elapsed" -ge "$duration" ] && break
@@ -115,10 +129,16 @@ while true; do
         exit 1
     fi
 
-    saver_pid="$(pgrep -n -f "$binary" || true)"
+    saver_pid="$(pgrep -n -x ghostty-saver || true)"
     saver_rss=""
     if [ -n "$saver_pid" ]; then
+        saver_seen=1
         saver_rss="$(ps -o rss= -p "$saver_pid" 2> /dev/null | tr -d ' ' || true)"
+    elif [ "$saver_seen" -eq 1 ]; then
+        # A keypress ends the screensaver. Sampling on without it would fill
+        # the tail of the log with an idle terminal and read as flat.
+        truncated=1
+        break
     fi
 
     printf '%s\t%s\t%s\n' "$elapsed" "$terminal_rss" "$saver_rss" >> "$samples"
@@ -126,6 +146,14 @@ while true; do
 done
 
 cleanup
+
+if [ "$truncated" -eq 1 ]; then
+    echo
+    echo "the screensaver exited after ${elapsed}s of ${duration}s, so the run is short." >&2
+    echo "a keypress ends it; leave the client alone for the whole duration." >&2
+    echo "samples so far: $samples" >&2
+    exit 2
+fi
 
 echo
 echo "samples: $samples"
