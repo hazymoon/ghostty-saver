@@ -57,7 +57,16 @@ public func queryWinsize(fd: Int32) throws -> TerminalSize {
 
 /// Sends `CSI 14 t` and reads the `CSI 4 ; height ; width t` reply.
 /// The caller is expected to have put the terminal in raw mode.
-public func queryCSI14t(fd: Int32, timeout: TimeInterval = 0.5) throws -> (width: Int, height: Int) {
+///
+/// The reply is read from `readFD`, which is expected to be non-blocking: in
+/// raw mode a read that finds nothing waits for as long as the terminal takes,
+/// and the deadline here bounds the loop, not a read inside it.
+public func queryCSI14t(
+    fd: Int32,
+    readFD: Int32? = nil,
+    timeout: TimeInterval = 0.5
+) throws -> (width: Int, height: Int) {
+    let replyFD = readFD ?? fd
     let query = "\u{1b}[14t"
     _ = query.withCString { write(fd, $0, strlen($0)) }
 
@@ -66,11 +75,14 @@ public func queryCSI14t(fd: Int32, timeout: TimeInterval = 0.5) throws -> (width
     var byte: UInt8 = 0
 
     while Date() < deadline {
-        var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        var pfd = pollfd(fd: replyFD, events: Int16(POLLIN), revents: 0)
         let remaining = Int32(max(0, deadline.timeIntervalSinceNow * 1000))
         let ready = poll(&pfd, 1, remaining)
         if ready <= 0 { continue }
-        let n = read(fd, &byte, 1)
+        // POLLERR and POLLNVAL answer positively as well, and neither will
+        // ever become readable, so there is nothing left to wait for.
+        if pfd.revents & Int16(POLLIN) == 0 { break }
+        let n = read(replyFD, &byte, 1)
         if n <= 0 { continue }
         buffer.append(byte)
         // The reply terminates with 't'.
@@ -93,7 +105,7 @@ public func queryCSI14t(fd: Int32, timeout: TimeInterval = 0.5) throws -> (width
 
 /// Resolves the pixel size, preferring TIOCGWINSZ and falling back to CSI 14 t.
 /// Raw mode is only entered for the fallback, and restored afterwards.
-public func resolveTerminalSize(fd: Int32) throws -> TerminalSize {
+public func resolveTerminalSize(fd: Int32, readFD: Int32? = nil) throws -> TerminalSize {
     guard isatty(fd) == 1 else { throw TerminalSizeError.notATTY }
 
     var size = try queryWinsize(fd: fd)
@@ -106,7 +118,7 @@ public func resolveTerminalSize(fd: Int32) throws -> TerminalSize {
     guard tcsetattr(fd, TCSANOW, &raw) == 0 else { throw TerminalSizeError.noPixelSize }
     defer { tcsetattr(fd, TCSANOW, &original) }
 
-    let pixels = try queryCSI14t(fd: fd)
+    let pixels = try queryCSI14t(fd: fd, readFD: readFD)
     size.pixelWidth = pixels.width
     size.pixelHeight = pixels.height
     guard size.hasPixels else { throw TerminalSizeError.noPixelSize }

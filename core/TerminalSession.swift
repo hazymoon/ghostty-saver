@@ -7,6 +7,18 @@ import Foundation
 // initialization out of the handler.
 
 private var outputDescriptor: Int32 = STDOUT_FILENO
+// Reading has its own descriptor, opened non-blocking. The terminal is in raw
+// mode with VMIN 1 while the screensaver runs, where a read that finds nothing
+// waits for as long as the terminal takes to say something - and it can be
+// nothing, if another reader on the same tty takes the byte between the poll
+// and the read. A stuck instance of this program is exactly such a reader, so
+// one hang on a tty makes the next one likelier.
+//
+// It matters that this is a second open() of /dev/tty rather than the same
+// descriptor or a dup of it: O_NONBLOCK belongs to the open file description,
+// and the one behind standard output is the shell's. Setting the flag there
+// would leave it set for the shell if this process is killed outright.
+private var inputDescriptor: Int32 = STDIN_FILENO
 private var originalTermios = termios()
 private var termiosSaved = false
 private var altScreenEntered = false
@@ -26,6 +38,10 @@ public enum TerminalSession {
     /// Where terminal output goes.
     public static var outputFD: Int32 { outputDescriptor }
 
+    /// Where replies and keypresses are read from. Non-blocking, so nothing
+    /// that reads it can be left waiting on a terminal that has gone quiet.
+    public static var inputFD: Int32 { inputDescriptor }
+
     /// Picks and opens the output. Returns whether it is a tty.
     /// Prefers sinkPath, then standard output, then /dev/tty when standard
     /// output has been redirected.
@@ -40,7 +56,13 @@ public enum TerminalSession {
             let fd = open("/dev/tty", O_RDWR)
             outputDescriptor = fd >= 0 ? fd : STDOUT_FILENO
         }
-        return isatty(outputDescriptor) == 1
+        guard isatty(outputDescriptor) == 1 else { return false }
+
+        // A sink was named for output, so its tty is not necessarily the one
+        // replies come back on. Read where writing goes in that case.
+        let readFD = sinkPath == nil ? open("/dev/tty", O_RDONLY | O_NONBLOCK) : -1
+        inputDescriptor = readFD >= 0 ? readFD : outputDescriptor
+        return true
     }
 
     /// Allocates shared memory tracking and installs signal and atexit
@@ -49,6 +71,7 @@ public enum TerminalSession {
         prepareShmTracking()
         // Force the globals to initialize now rather than inside a handler.
         _ = outputDescriptor
+        _ = inputDescriptor
         _ = termiosSaved
         _ = altScreenEntered
         _ = restored
@@ -113,7 +136,7 @@ public enum TerminalSession {
         // The reply to the last frame is often still in flight. TCSAFLUSH only
         // discards what has already arrived, so give it a moment to land first,
         // otherwise it turns up on the shell prompt as stray text.
-        awaitPendingInput(fd: outputDescriptor)
+        awaitPendingInput(fd: inputDescriptor)
 
         if termiosSaved {
             // TCSAFLUSH rather than TCSANOW: the reply to the last frame is

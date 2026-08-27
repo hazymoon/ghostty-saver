@@ -283,7 +283,7 @@ if let explicit = options.explicitSize {
     size = TerminalSize(pixelWidth: explicit.width, pixelHeight: explicit.height, columns: 0, rows: 0)
 } else {
     do {
-        size = try resolveTerminalSize(fd: TerminalSession.outputFD)
+        size = try resolveTerminalSize(fd: TerminalSession.outputFD, readFD: TerminalSession.inputFD)
     } catch {
         fail("could not determine the terminal size: \(error)")
     }
@@ -305,7 +305,7 @@ var transport = KittySharedMemoryTransport(
     height: renderer.height,
     quiet: options.quiet
 )
-let reader = ResponseReader(fd: TerminalSession.outputFD)
+let reader = ResponseReader(fd: TerminalSession.inputFD)
 
 // Only collected with --stats: one Double per frame per series is small, but a
 // screensaver runs for hours and nothing ever reads them otherwise.
@@ -322,7 +322,9 @@ var stopped = false
 /// Re-measures the terminal and rebuilds everything that was sized to it.
 /// The pipeline does not depend on the size, so the shader is not recompiled.
 func adoptNewTerminalSize() {
-    guard let updated = try? resolveTerminalSize(fd: TerminalSession.outputFD),
+    guard let updated = try? resolveTerminalSize(
+            fd: TerminalSession.outputFD, readFD: TerminalSession.inputFD
+          ),
           updated.hasPixels else { return }
     guard updated.pixelWidth != size.pixelWidth || updated.pixelHeight != size.pixelHeight else { return }
 
@@ -397,10 +399,10 @@ while !stopped {
         }
         if options.stats { ackSamples.append(monotonicNow() - ackStart) }
     } else {
-        var pfd = pollfd(fd: TerminalSession.outputFD, events: Int16(POLLIN), revents: 0)
-        if poll(&pfd, 1, 0) > 0 {
+        var pfd = pollfd(fd: TerminalSession.inputFD, events: Int16(POLLIN), revents: 0)
+        if poll(&pfd, 1, 0) > 0 && pfd.revents & Int16(POLLIN) != 0 {
             var discard: UInt8 = 0
-            if read(TerminalSession.outputFD, &discard, 1) > 0 { stopped = true }
+            if read(TerminalSession.inputFD, &discard, 1) > 0 { stopped = true }
         }
     }
 

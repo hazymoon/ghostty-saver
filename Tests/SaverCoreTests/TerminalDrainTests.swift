@@ -97,3 +97,74 @@ struct TerminalDrainTests {
         #expect(completes(fd: pty.slave, within: 2.0))
     }
 }
+
+/// The state that hung a real run: a byte arrives, poll reports it, and by the
+/// time the read happens another reader on the same tty has taken it. A stuck
+/// instance of this program is such a reader, which is how one hang made the
+/// next one likelier.
+@Suite("reading a tty another reader is on")
+struct ContendedReadTests {
+    /// Runs one round: a reader parked on the tty, a byte written while the
+    /// subject is waiting for it. Returns whether the subject came back.
+    private func subjectReturns(startCompetitor: Bool) -> Bool {
+        let master = posix_openpt(O_RDWR | O_NOCTTY)
+        guard master >= 0, grantpt(master) == 0, unlockpt(master) == 0,
+              let name = ptsname(master) else { return false }
+        let path = String(cString: name)
+        let slave = open(path, O_RDWR | O_NOCTTY)
+        guard slave >= 0 else { close(master); return false }
+
+        var raw = termios()
+        _ = tcgetattr(slave, &raw)
+        cfmakeraw(&raw)
+        raw.c_cc.16 = 1   // VMIN
+        raw.c_cc.17 = 0   // VTIME
+        _ = tcsetattr(slave, TCSANOW, &raw)
+
+        // The subject gets its own descriptor, the way the screensaver's
+        // reader does, so the competitor below is a separate reader rather
+        // than the same one.
+        let subjectFD = open(path, O_RDONLY | O_NOCTTY)
+        guard subjectFD >= 0 else { close(master); close(slave); return false }
+
+        if startCompetitor {
+            Thread.detachNewThread {
+                var byte: UInt8 = 0
+                _ = read(slave, &byte, 1)
+            }
+            // Let it reach the read before anything is sent.
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        let reader = ResponseReader(fd: subjectFD)
+        let done = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            _ = reader.next(timeout: 0.2)
+            done.signal()
+        }
+
+        Thread.sleep(forTimeInterval: 0.01)
+        var byte: UInt8 = 0x1b
+        _ = write(master, &byte, 1)
+
+        let returned = done.wait(timeout: .now() + 3.0) == .success
+        close(master)
+        close(slave)
+        close(subjectFD)
+        return returned
+    }
+
+    /// A blocking reader parks on the first round here, near enough every
+    /// time, but the state is a race and a round is cheap.
+    @Test("it comes back even when another reader takes the byte")
+    func survivesContention() {
+        for round in 1...10 {
+            #expect(subjectReturns(startCompetitor: true), "round \(round) never came back")
+        }
+    }
+
+    @Test("it comes back with the tty to itself")
+    func uncontended() {
+        #expect(subjectReturns(startCompetitor: false))
+    }
+}

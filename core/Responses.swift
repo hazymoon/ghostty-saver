@@ -25,8 +25,14 @@ public final class ResponseReader {
         case inAPCSawEscape
     }
 
+    /// The descriptor is made non-blocking here rather than assumed to be.
+    /// Everything below is written around a read that can come back empty, and
+    /// in raw mode with VMIN 1 a blocking one does not come back at all when
+    /// the byte poll saw goes to another reader on the same tty.
     public init(fd: Int32) {
         self.fd = fd
+        let flags = fcntl(fd, F_GETFL)
+        if flags >= 0 { _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK) }
     }
 
     /// Waits until one complete APC reply arrives, a non-APC byte shows up, or
@@ -51,10 +57,17 @@ public final class ResponseReader {
                 if errno == EINTR { continue }
                 return .timeout
             }
+            // A poll that answered is not a poll that said "readable": POLLERR
+            // and POLLNVAL come back positive too.
+            if pfd.revents & Int16(POLLIN) == 0 { return .timeout }
 
             let n = chunk.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
             if n <= 0 {
                 if n < 0 && errno == EINTR { continue }
+                // The descriptor is non-blocking, so the byte poll saw can be
+                // gone by the time it is read - another reader on the same tty
+                // takes it. That is not the end of the wait; the deadline is.
+                if n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) { continue }
                 return .timeout
             }
             pending.append(contentsOf: chunk[0..<n])
