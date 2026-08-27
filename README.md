@@ -64,7 +64,8 @@ a consumer can rely on that rather than assume it.
 ```
 ghostty-saver [options]
 
-  --shader NAME     which shader to use (default: matrix)
+  --shader NAME     which shader to use (default: matrix), or random
+  --list-shaders    list the shaders and what they draw, then exit
   --size WxH        state the resolution instead of asking the terminal
   --seconds N       stop after N seconds (default: run until a key is pressed)
   --frames N        stop after N frames
@@ -80,16 +81,44 @@ Any keypress exits. The terminal is restored on exit, on SIGINT, SIGTERM and
 SIGHUP: images are deleted, the cursor comes back, the alternate screen is left
 and termios is put back the way it was.
 
+## Shaders
+
+| name         | what it draws                                                     |
+| ------------ | ----------------------------------------------------------------- |
+| `matrix`     | Digital rain. The default.                                        |
+| `starwars`   | An opening crawl, receding to a vanishing point over a starfield. |
+| `hyperspace` | Stars stretching into streaks, a white-out, and back to a cruise. |
+| `mystify`    | Windows' Mystify: bouncing polygons trailing coloured ribbons.    |
+| `tunnel`     | The demoscene tunnel, flown down with the camera swaying.         |
+| `synthwave`  | A banded sun on the horizon over a neon grid running away.        |
+| `toasters`   | After Dark's flying toasters, with the toast.                     |
+| `aurora`     | Northern lights over a black ridge line.                          |
+| `gradient`   | Not a screensaver: the fixture that proves the conversion works.  |
+
+`--list-shaders` prints the same list, taken from the shaders themselves.
+
+`--shader random` picks one for you at each lock, which is the point of having
+more than one. It never picks `gradient`.
+
+```tmux
+set -g lock-command '~/.local/bin/ghostty-saver --shader random'
+```
+
 ## Writing a shader
 
-Drop a Shadertoy-style file into `shaders/` containing only `mainImage`:
+Drop a Shadertoy-style file into `shaders/` containing only `mainImage`, with a
+comment at the top saying what it draws:
 
 ```glsl
+// A wash of colour that goes nowhere.
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
     fragColor = vec4(uv, 0.5 + 0.5 * sin(iTime), 1.0);
 }
 ```
+
+That leading comment is what `--list-shaders` shows: it is read up to the first
+blank `//`, so the notes below the summary stay out of it.
 
 Then regenerate:
 
@@ -115,7 +144,17 @@ Set `GHOSTTY_SAVER_PREFIX_FILE` to a local copy to work offline, or
 Shaders must be stateless. Ghostty's custom-shader has no frame-to-frame
 storage, so everything is derived from `iTime` and a hash. `shaders/matrix.glsl`
 is written that way: trail positions, glyphs and depth all come out of the
-clock.
+clock. So does everything else here - a corner bouncing off the edges in
+`mystify` is a triangle wave, a toaster's place in the flock in `toasters` is a
+hash of which tile it is in, and the crawl in `starwars` inverts the projection
+to turn a pixel into a line and a column. Nothing is integrated forward.
+
+Two things follow from being on a screen rather than on Shadertoy. Anything
+drawn far away needs to fade out before one pixel covers more than it can
+resolve, or it shimmers - `synthwave` fades each family of grid lines when its
+own spacing gets too tight, and `starwars` stops the text at the same point.
+And anything counted out in pixels wants to be counted out in screen heights
+instead, so the look survives a retina display and a small window alike.
 
 To look at a shader without a terminal:
 
@@ -123,6 +162,10 @@ To look at a shader without a terminal:
 swift build -c release
 .build/release/ghostty-saver --shader matrix --dump /tmp/frame.png --at 7.5 --size 1600x900
 ```
+
+`--at` matters for anything on a long cycle: `hyperspace` only jumps near the
+end of its 22 seconds, and `starwars` takes a couple of minutes to run the
+crawl through.
 
 ## Tests
 
@@ -133,8 +176,16 @@ swift test
 The suite covers the exact bytes of the graphics protocol escape sequence, APC
 reply framing, the shared memory lifecycle, linear texture alignment, a real
 GPU render read back through the shared memory mapping, the generated uniform
-offsets, resize handling, and what each shader has to look like. None of it
-needs a terminal.
+offsets, resize handling, shader selection, and what each shader has to look
+like. None of it needs a terminal.
+
+Every shader is checked for the things that hold whatever it draws - it
+compiles, the same `iTime` gives the same frame, a different one does not, and
+it draws something at more than one resolution - and then once more for the
+thing that makes it itself: that the crawl is yellow and stays inside a narrow
+window, that hyperspace flashes when it jumps, that the aurora is green where
+it is lit. Those are deliberately loose. They are there to catch a shader that
+has stopped drawing what its name says, not to pin down a look.
 
 ## Checking for leaks
 
