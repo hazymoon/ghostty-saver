@@ -789,7 +789,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         float3 angle = (float3((_90.iTime * 0.04500000178813934326171875) + (float(shape) * 0.5)) + float3(0.0, 0.3300000131130218505859375, 0.670000016689300537109375)) * 6.28318023681640625;
         float3 hueCos = cos(angle);
         float3 hueSin = sin(angle);
-        for (int _step = 0; _step < 12; _step++)
+        for (int _step = 0; _step < 11; _step++)
         {
             float3 hue = float3(0.5) + (hueCos * 0.5);
             float3 turned = (hueCos * stepCos) + (hueSin * stepSin);

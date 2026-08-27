@@ -82,7 +82,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         vec3 hueCos = cos(angle);
         vec3 hueSin = sin(angle);
 
-        for (int step = 0; step < TRAIL; step++) {
+        // age reaches 1 on the last copy, and fade is its square complement,
+        // so that copy is drawn at zero: TRAIL is where the ribbon fades out,
+        // not how many copies there are to draw.
+        for (int step = 0; step < TRAIL - 1; step++) {
             // Each copy is drawn in the hue the leading edge had that long ago,
             // which is where the ribbon's colour gradient comes from. Taken and
             // rotated on at the top of the loop, so the early-out below cannot
