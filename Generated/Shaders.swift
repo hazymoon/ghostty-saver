@@ -169,9 +169,9 @@ float hash11(thread const float& n)
 }
 
 static inline __attribute__((always_inline))
-float3 starfield(thread const float2& fragCoord, constant Globals& v_75)
+float3 starfield(thread const float2& fragCoord, constant Globals& _75)
 {
-    float cellSize = v_75.iResolution[1u] / 44.0;
+    float cellSize = _75.iResolution[1u] / 44.0;
     float2 grid = fragCoord / float2(cellSize);
     float2 cell = floor(grid);
     float2 param = cell;
@@ -185,25 +185,25 @@ float3 starfield(thread const float2& fragCoord, constant Globals& v_75)
     float2 at = float2(hash11(param_1), hash11(param_2));
     float away = length((fract(grid) - at) * cellSize);
     float param_3 = seed * 3.2999999523162841796875;
-    float twinkle = 0.75 + (0.25 * sin((v_75.iTime * (0.5 + (1.60000002384185791015625 * hash11(param_3)))) + (seed * 90.0)));
+    float twinkle = 0.75 + (0.25 * sin((_75.iTime * (0.5 + (1.60000002384185791015625 * hash11(param_3)))) + (seed * 90.0)));
     float param_4 = seed * 7.099999904632568359375;
     return ((float3(0.819999992847442626953125, 0.87999999523162841796875, 1.0) * exp(((-away) * away) / 0.4000000059604644775390625)) * (0.25 + (0.75 * hash11(param_4)))) * twinkle;
 }
 
 static inline __attribute__((always_inline))
-float fold(thread const float& x, thread const float& seed, thread const float& rate, constant Globals& v_75)
+float fold(thread const float& x, thread const float& seed, thread const float& rate, constant Globals& _75)
 {
-    return ((sin(((x * 1.2999999523162841796875) + ((v_75.iTime * 0.20999999344348907470703125) * rate)) + seed) * 0.100000001490116119384765625) + (sin(((x * 2.7000000476837158203125) - ((v_75.iTime * 0.17000000178813934326171875) * rate)) + (seed * 2.2999999523162841796875)) * 0.048000000417232513427734375)) + (sin(((x * 5.099999904632568359375) + ((v_75.iTime * 0.12999999523162841796875) * rate)) + (seed * 3.7000000476837158203125)) * 0.02099999971687793731689453125);
+    return ((sin(((x * 1.2999999523162841796875) + ((_75.iTime * 0.20999999344348907470703125) * rate)) + seed) * 0.100000001490116119384765625) + (sin(((x * 2.7000000476837158203125) - ((_75.iTime * 0.17000000178813934326171875) * rate)) + (seed * 2.2999999523162841796875)) * 0.048000000417232513427734375)) + (sin(((x * 5.099999904632568359375) + ((_75.iTime * 0.12999999523162841796875) * rate)) + (seed * 3.7000000476837158203125)) * 0.02099999971687793731689453125);
 }
 
 static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& v_75)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _75)
 {
-    float2 uv = (fragCoord - (float2(v_75.iResolution[0], v_75.iResolution[1]) * 0.5)) / float2(v_75.iResolution[1u]);
+    float2 uv = (fragCoord - (float2(_75.iResolution[0], _75.iResolution[1]) * 0.5)) / float2(_75.iResolution[1u]);
     uv.y = -uv.y;
     float3 color = mix(float3(0.02999999932944774627685546875, 0.054999999701976776123046875, 0.0949999988079071044921875), float3(0.00999999977648258209228515625, 0.01400000043213367462158203125, 0.04500000178813934326171875), float3(smoothstep(-0.5, 0.5, uv.y)));
     float2 param = fragCoord;
-    color += starfield(param, v_75);
+    color += starfield(param, _75);
     for (int i = 0; i < 5; i++)
     {
         float seed = (float(i) * 13.69999980926513671875) + 1.89999997615814208984375;
@@ -212,7 +212,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         float param_2 = uv.x;
         float param_3 = seed;
         float param_4 = rate;
-        float foot = ((-0.1599999964237213134765625) + (float(i) * 0.054999999701976776123046875)) + fold(param_2, param_3, param_4, v_75);
+        float foot = ((-0.1599999964237213134765625) + (float(i) * 0.054999999701976776123046875)) + fold(param_2, param_3, param_4, _75);
         float above = uv.y - foot;
         float param_5 = seed * 5.30000019073486328125;
         float height = 0.300000011920928955078125 + (0.2199999988079071044921875 * hash11(param_5));
@@ -221,7 +221,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         {
             continue;
         }
-        float span = (0.5 + (0.5 * sin(((uv.x * 0.75) + (v_75.iTime * 0.0500000007450580596923828125)) + (seed * 2.0)))) * (0.4000000059604644775390625 + (0.60000002384185791015625 * (0.5 + (0.5 * sin(((uv.x * 1.89999997615814208984375) - (v_75.iTime * 0.0900000035762786865234375)) + (seed * 4.0))))));
+        float span = (0.5 + (0.5 * sin(((uv.x * 0.75) + (_75.iTime * 0.0500000007450580596923828125)) + (seed * 2.0)))) * (0.4000000059604644775390625 + (0.60000002384185791015625 * (0.5 + (0.5 * sin(((uv.x * 1.89999997615814208984375) - (_75.iTime * 0.0900000035762786865234375)) + (seed * 4.0))))));
         span = smoothstep(0.0599999986588954925537109375, 0.62000000476837158203125, span);
         if (span <= 0.0)
         {
@@ -230,9 +230,9 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         float param_6 = uv.x;
         float param_7 = seed * 1.2999999523162841796875;
         float param_8 = rate;
-        float lean = uv.x + (fold(param_6, param_7, param_8, v_75) * 1.60000002384185791015625);
+        float lean = uv.x + (fold(param_6, param_7, param_8, _75) * 1.60000002384185791015625);
         float rays = 0.5 + (0.5 * sin((lean * 78.0) + (seed * 40.0)));
-        rays = mix(rays, 0.5 + (0.5 * sin((((lean * 78.0) * 0.37000000476837158203125) - (v_75.iTime * 0.4000000059604644775390625)) + seed)), 0.5);
+        rays = mix(rays, 0.5 + (0.5 * sin((((lean * 78.0) * 0.37000000476837158203125) - (_75.iTime * 0.4000000059604644775390625)) + seed)), 0.5);
         rays = mix(rays, 0.75, smoothstep(0.0, height * 0.699999988079071044921875, fast::max(above, 0.0)));
         float3 tint = mix(float3(0.1599999964237213134765625, 1.0, 0.519999980926513671875), float3(0.4199999868869781494140625, 0.300000011920928955078125, 0.949999988079071044921875), float3(fast::clamp(above / (height * 0.550000011920928955078125), 0.0, 1.0)));
         color += ((((tint * body) * span) * mix(0.449999988079071044921875, 1.0, rays)) * 0.5);
@@ -243,12 +243,12 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     fragColor = float4(color, 1.0);
 }
 
-fragment main0_out main0(constant Globals& v_75 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _75 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, v_75);
+    mainImage(param, param_1, _75);
     out._fragColor = param;
     return out;
 }
@@ -304,19 +304,19 @@ struct main0_out
 };
 
 static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& v_38)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _38)
 {
-    float2 uv = fragCoord / float2(v_38.iResolution[0], v_38.iResolution[1]);
-    float pulse = 0.5 + (0.5 * sin(v_38.iTime * 2.0));
+    float2 uv = fragCoord / float2(_38.iResolution[0], _38.iResolution[1]);
+    float pulse = 0.5 + (0.5 * sin(_38.iTime * 2.0));
     fragColor = float4(uv.x, uv.y, pulse, 1.0);
 }
 
-fragment main0_out main0(constant Globals& v_38 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _38 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, v_38);
+    mainImage(param, param_1, _38);
     out._fragColor = param;
     return out;
 }
@@ -404,12 +404,12 @@ float hash11(thread const float& n)
 }
 
 static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& v_96)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _96)
 {
-    float2 p = (fragCoord - (float2(v_96.iResolution[0], v_96.iResolution[1]) * 0.5)) / float2(v_96.iResolution[1u]);
+    float2 p = (fragCoord - (float2(_96.iResolution[0], _96.iResolution[1]) * 0.5)) / float2(_96.iResolution[1u]);
     float radius = length(p);
-    float pixel = 1.0 / v_96.iResolution[1u];
-    float u = mod(v_96.iTime, 22.0);
+    float pixel = 1.0 / _96.iResolution[1u];
+    float u = mod(_96.iTime, 22.0);
     float param = u;
     float travel = travelled(param);
     float param_1 = u;
@@ -464,12 +464,12 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     fragColor = float4(color, 1.0);
 }
 
-fragment main0_out main0(constant Globals& v_96 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _96 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, v_96);
+    mainImage(param, param_1, _96);
     out._fragColor = param;
     return out;
 }
@@ -591,7 +591,7 @@ float glyphMask(thread const float2& cellUV, thread const float& seed)
 }
 
 static inline __attribute__((always_inline))
-float3 rainLayer(thread const float2& fragCoord, thread const float& z, thread const float& layerSeed, constant Globals& v_199)
+float3 rainLayer(thread const float2& fragCoord, thread const float& z, thread const float& layerSeed, constant Globals& _199)
 {
     float cellHeight = 26.0 * z;
     float cellWidth = cellHeight * 0.62000000476837158203125;
@@ -604,8 +604,8 @@ float3 rainLayer(thread const float2& fragCoord, thread const float& z, thread c
     float speed = (7.0 + (16.0 * hash11(param_1))) * z;
     float param_2 = columnSeed * 13.770000457763671875;
     float phase = hash11(param_2) * 900.0;
-    float rows = v_199.iResolution[1u] / cellHeight;
-    float travelled = (v_199.iTime * speed) + phase;
+    float rows = _199.iResolution[1u] / cellHeight;
+    float travelled = (_199.iTime * speed) + phase;
     float roughCycle = rows * 2.400000095367431640625;
     float pass = floor(travelled / roughCycle);
     float2 param_3 = float2(columnSeed * 61.0, pass);
@@ -622,7 +622,7 @@ float3 rainLayer(thread const float2& fragCoord, thread const float& z, thread c
     float fade = exp((-behindHead) / (trailLength * 0.300000011920928955078125));
     float param_5 = columnSeed * 5.110000133514404296875;
     float flickerRate = 5.0 + (9.0 * hash11(param_5));
-    float glyphSeed = ((floor(v_199.iTime * flickerRate) + (cell.y * 17.0)) + layerSeed) + (pass * 7.0);
+    float glyphSeed = ((floor(_199.iTime * flickerRate) + (cell.y * 17.0)) + layerSeed) + (pass * 7.0);
     float3 param_6 = float3(cell, glyphSeed);
     float2 param_7 = cellUV;
     float param_8 = hash31(param_6) * 128.0;
@@ -638,7 +638,7 @@ float3 rainLayer(thread const float2& fragCoord, thread const float& z, thread c
 }
 
 static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& v_199)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _199)
 {
     float3 color = float3(0.0);
     for (int layer = 0; layer < 3; layer++)
@@ -648,20 +648,20 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         float2 param = fragCoord;
         float param_1 = z;
         float param_2 = float(layer) * 37.0;
-        color += rainLayer(param, param_1, param_2, v_199);
+        color += rainLayer(param, param_1, param_2, _199);
     }
     color += float3(0.0, 0.009499999694526195526123046875, 0.00319999991916120052337646484375);
-    float2 uv = fragCoord / float2(v_199.iResolution[0], v_199.iResolution[1]);
+    float2 uv = fragCoord / float2(_199.iResolution[0], _199.iResolution[1]);
     float vignette = smoothstep(1.14999997615814208984375, 0.300000011920928955078125, length(uv - float2(0.5)));
     fragColor = float4(color * vignette, 1.0);
 }
 
-fragment main0_out main0(constant Globals& v_199 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _199 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, v_199);
+    mainImage(param, param_1, _199);
     out._fragColor = param;
     return out;
 }
@@ -718,6 +718,14 @@ struct spvUnsafeArray
         return elements[pos];
     }
 };
+
+// Implementation of signed integer mod accurate to SPIR-V specification
+template<typename Tx, typename Ty>
+inline Tx spvSMod(Tx x, Ty y)
+{
+    Tx remainder = x - y * (x / y);
+    return select(Tx(remainder + y), remainder, remainder == 0 || (x >= 0) == (y >= 0));
+}
 
 struct Globals
 {
@@ -783,11 +791,11 @@ float3 palette(thread const float& t)
 }
 
 static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& v_115)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _115)
 {
-    float aspect = v_115.iResolution[0u] / v_115.iResolution[1u];
-    float2 p = fragCoord / float2(v_115.iResolution[1u]);
-    float pixel = 1.0 / v_115.iResolution[1u];
+    float aspect = _115.iResolution[0u] / _115.iResolution[1u];
+    float2 p = fragCoord / float2(_115.iResolution[1u]);
+    float pixel = 1.0 / _115.iResolution[1u];
     float3 color = float3(0.0);
     spvUnsafeArray<float4, 4> motion;
     spvUnsafeArray<float2, 4> points;
@@ -806,7 +814,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         for (int _step = 0; _step < 12; _step++)
         {
             float age = float(_step) / 11.0;
-            float t = v_115.iTime - (float(_step) * 0.100000001490116119384765625);
+            float t = _115.iTime - (float(_step) * 0.100000001490116119384765625);
             for (int i_1 = 0; i_1 < 4; i_1++)
             {
                 float4 m = motion[i_1];
@@ -819,14 +827,14 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
             {
                 float2 param_6 = p;
                 float2 param_7 = points[i_2];
-                float2 param_8 = points[(i_2 + 1) % 4];
+                float2 param_8 = points[spvSMod(i_2 + 1, 4)];
                 nearest = fast::min(nearest, segmentDistance(param_6, param_7, param_8));
             }
             float width = (pixel * 1.2999999523162841796875) * mix(1.0, 0.550000011920928955078125, age);
             float core = smoothstep(width * 2.0, width * 0.5, nearest);
             float glow = exp((-nearest) / (pixel * 9.0)) * 0.300000011920928955078125;
             float fade = (1.0 - age) * (1.0 - age);
-            float param_9 = ((v_115.iTime * 0.04500000178813934326171875) - (float(_step) * 0.01600000075995922088623046875)) + (float(shape) * 0.5);
+            float param_9 = ((_115.iTime * 0.04500000178813934326171875) - (float(_step) * 0.01600000075995922088623046875)) + (float(shape) * 0.5);
             float3 hue = palette(param_9);
             color += ((hue * (core + glow)) * fade);
         }
@@ -835,12 +843,12 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     fragColor = float4(color, 1.0);
 }
 
-fragment main0_out main0(constant Globals& v_115 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _115 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, v_115);
+    mainImage(param, param_1, _115);
     out._fragColor = param;
     return out;
 }
@@ -957,9 +965,9 @@ float hash11(thread const float& n)
 }
 
 static inline __attribute__((always_inline))
-float3 starfield(thread const float2& fragCoord, constant Globals& v_390)
+float3 starfield(thread const float2& fragCoord, constant Globals& _390)
 {
-    float cellSize = v_390.iResolution[1u] / 42.0;
+    float cellSize = _390.iResolution[1u] / 42.0;
     float2 grid = fragCoord / float2(cellSize);
     float2 cell = floor(grid);
     float2 param = cell;
@@ -975,7 +983,7 @@ float3 starfield(thread const float2& fragCoord, constant Globals& v_390)
     float param_3 = seed * 7.099999904632568359375;
     float brightness = 0.300000011920928955078125 + (0.699999988079071044921875 * hash11(param_3));
     float param_4 = seed * 3.2999999523162841796875;
-    float twinkle = 0.7799999713897705078125 + (0.2199999988079071044921875 * sin((v_390.iTime * (0.60000002384185791015625 + (1.7999999523162841796875 * hash11(param_4)))) + (seed * 90.0)));
+    float twinkle = 0.7799999713897705078125 + (0.2199999988079071044921875 * sin((_390.iTime * (0.60000002384185791015625 + (1.7999999523162841796875 * hash11(param_4)))) + (seed * 90.0)));
     return ((float3(0.85000002384185791015625, 0.89999997615814208984375, 1.0) * exp(((-away) * away) / 0.4199999868869781494140625)) * brightness) * twinkle;
 }
 
@@ -1073,24 +1081,24 @@ float ink(thread const float& column, thread const float& line)
 }
 
 static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& v_390)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _390)
 {
-    float2 uv = (fragCoord - (float2(v_390.iResolution[0], v_390.iResolution[1]) * 0.5)) / float2(v_390.iResolution[1u]);
+    float2 uv = (fragCoord - (float2(_390.iResolution[0], _390.iResolution[1]) * 0.5)) / float2(_390.iResolution[1u]);
     uv.y = -uv.y;
     float2 param = fragCoord;
-    float3 color = starfield(param, v_390);
+    float3 color = starfield(param, _390);
     float below = 0.4199999868869781494140625 - uv.y;
     if (below > 0.0)
     {
-        float aspect = fast::min(v_390.iResolution[0u] / v_390.iResolution[1u], 1.77777779102325439453125);
+        float aspect = fast::min(_390.iResolution[0u] / _390.iResolution[1u], 1.77777779102325439453125);
         float stretch = 1.77777779102325439453125 / aspect;
         float depth = (11.0 * stretch) / below;
         float nearest = (11.0 * stretch) / 0.920000016689300537109375;
         float loop = 166.399993896484375;
-        float scrolled = mod(v_390.iTime, loop) / 6.400000095367431640625;
+        float scrolled = mod(_390.iTime, loop) / 6.400000095367431640625;
         float line = scrolled - depth;
         float column = ((uv.x * depth) / 0.75) + 14.0;
-        float pixel = 1.0 / v_390.iResolution[1u];
+        float pixel = 1.0 / _390.iResolution[1u];
         float spanX = (depth / 0.75) * pixel;
         float spanY = ((depth * depth) / (11.0 * stretch)) * pixel;
         float param_1 = column - (spanX * 0.25);
@@ -1110,12 +1118,12 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     fragColor = float4(color, 1.0);
 }
 
-fragment main0_out main0(constant Globals& v_390 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _390 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, v_390);
+    mainImage(param, param_1, _390);
     out._fragColor = param;
     return out;
 }
@@ -1184,22 +1192,22 @@ float toLine(thread const float& x)
 }
 
 static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& v_69)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _69)
 {
-    float2 uv = (fragCoord - (float2(v_69.iResolution[0], v_69.iResolution[1]) * 0.5)) / float2(v_69.iResolution[1u]);
+    float2 uv = (fragCoord - (float2(_69.iResolution[0], _69.iResolution[1]) * 0.5)) / float2(_69.iResolution[1u]);
     uv.y = -uv.y;
-    float pixel = 1.0 / v_69.iResolution[1u];
+    float pixel = 1.0 / _69.iResolution[1u];
     float3 color;
     if (uv.y > 0.0599999986588954925537109375)
     {
         float up = uv.y - 0.0599999986588954925537109375;
         color = mix(float3(0.319999992847442626953125, 0.039999999105930328369140625, 0.3400000035762786865234375), float3(0.02999999932944774627685546875, 0.00999999977648258209228515625, 0.100000001490116119384765625), float3(smoothstep(0.0, 0.550000011920928955078125, up)));
-        float2 cell = floor(fragCoord / float2(v_69.iResolution[1u] / 40.0));
+        float2 cell = floor(fragCoord / float2(_69.iResolution[1u] / 40.0));
         float2 param = cell;
         float seed = hash21(param);
         if (seed < 0.100000001490116119384765625)
         {
-            float2 inCell = fract(fragCoord / float2(v_69.iResolution[1u] / 40.0));
+            float2 inCell = fract(fragCoord / float2(_69.iResolution[1u] / 40.0));
             float2 param_1 = cell + float2(3.7000000476837158203125);
             float2 param_2 = cell + float2(9.1000003814697265625);
             float2 at = float2(hash21(param_1), hash21(param_2));
@@ -1229,7 +1237,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         float below = 0.0599999986588954925537109375 - uv.y;
         float depth = 0.3400000035762786865234375 / below;
         float across = (uv.x * depth) / 0.3400000035762786865234375;
-        float along = depth - (v_69.iTime * 0.550000011920928955078125);
+        float along = depth - (_69.iTime * 0.550000011920928955078125);
         float spanAcross = (depth / 0.3400000035762786865234375) * pixel;
         float spanAlong = ((depth * depth) / 0.3400000035762786865234375) * pixel;
         float halfWidth = 0.800000011920928955078125;
@@ -1246,12 +1254,12 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     fragColor = float4(color, 1.0);
 }
 
-fragment main0_out main0(constant Globals& v_69 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _69 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, v_69);
+    mainImage(param, param_1, _69);
     out._fragColor = param;
     return out;
 }
@@ -1395,9 +1403,9 @@ float4 over(thread const float4& top, thread const float4& bottom)
 }
 
 static inline __attribute__((always_inline))
-float4 toaster(thread const float2& p, thread const float& seed, thread const float& aa, constant Globals& v_272)
+float4 toaster(thread const float2& p, thread const float& seed, thread const float& aa, constant Globals& _272)
 {
-    float flap = sin(((v_272.iTime * 5.19999980926513671875) * (0.800000011920928955078125 + (0.4000000059604644775390625 * seed))) + (seed * 39.0));
+    float flap = sin(((_272.iTime * 5.19999980926513671875) * (0.800000011920928955078125 + (0.4000000059604644775390625 * seed))) + (seed * 39.0));
     float2 param = p;
     float2 param_1 = float2(0.300000011920928955078125, -0.14000000059604644775390625);
     float param_2 = 0.949999988079071044921875 - (flap * 0.4000000059604644775390625);
@@ -1454,10 +1462,10 @@ float4 toaster(thread const float2& p, thread const float& seed, thread const fl
 }
 
 static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& v_272)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _272)
 {
-    float2 p = (fragCoord - (float2(v_272.iResolution[0], v_272.iResolution[1]) * 0.5)) / float2(v_272.iResolution[1u]);
-    float pixel = 1.0 / v_272.iResolution[1u];
+    float2 p = (fragCoord - (float2(_272.iResolution[0], _272.iResolution[1]) * 0.5)) / float2(_272.iResolution[1u]);
+    float pixel = 1.0 / _272.iResolution[1u];
     float2 heading = float2(-0.921982109546661376953125, 0.387232482433319091796875);
     float2x2 toLane = float2x2(float2(heading.x, -heading.y), float2(heading.y, heading.x));
     float2x2 fromLane = float2x2(float2(heading.x, heading.y), float2(-heading.y, heading.x));
@@ -1471,7 +1479,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         float scale = 0.519999980926513671875;
         float aa = pixel / (tile * scale);
         float2 lane = (toLane * p) / float2(tile);
-        lane.x -= ((v_272.iTime * speed) / tile);
+        lane.x -= ((_272.iTime * speed) / tile);
         float2 home = floor(lane);
         for (int dy = -1; dy <= 1; dy++)
         {
@@ -1510,7 +1518,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
                     float2 param_6 = local;
                     float param_7 = seed;
                     float param_8 = aa;
-                    _736 = toaster(param_6, param_7, param_8, v_272);
+                    _736 = toaster(param_6, param_7, param_8, _272);
                 }
                 float4 drawn = _736;
                 float4 _757 = drawn;
@@ -1528,12 +1536,12 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     fragColor = float4(color, 1.0);
 }
 
-fragment main0_out main0(constant Globals& v_272 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _272 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, v_272);
+    mainImage(param, param_1, _272);
     out._fragColor = param;
     return out;
 }
@@ -1609,15 +1617,15 @@ float3 palette(thread const float& t)
 }
 
 static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& v_72)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _72)
 {
-    float2 drift = float2(sin(v_72.iTime * 0.310000002384185791015625), sin((v_72.iTime * 0.23000000417232513427734375) + 1.7000000476837158203125)) * 0.10999999940395355224609375;
-    float2 p = ((fragCoord - (float2(v_72.iResolution[0], v_72.iResolution[1]) * 0.5)) / float2(v_72.iResolution[1u])) - drift;
+    float2 drift = float2(sin(_72.iTime * 0.310000002384185791015625), sin((_72.iTime * 0.23000000417232513427734375) + 1.7000000476837158203125)) * 0.10999999940395355224609375;
+    float2 p = ((fragCoord - (float2(_72.iResolution[0], _72.iResolution[1]) * 0.5)) / float2(_72.iResolution[1u])) - drift;
     float radius = fast::max(length(p), 9.9999997473787516355514526367188e-05);
     float around = precise::atan2(p.y, p.x) * 0.15915493667125701904296875;
-    float depth = (0.3400000035762786865234375 / radius) + (v_72.iTime * 0.85000002384185791015625);
+    float depth = (0.3400000035762786865234375 / radius) + (_72.iTime * 0.85000002384185791015625);
     float twisted = around + (depth * 0.054999999701976776123046875);
-    float pixel = 1.0 / v_72.iResolution[1u];
+    float pixel = 1.0 / _72.iResolution[1u];
     float ringSpan = ((0.3400000035762786865234375 / (radius * radius)) * pixel) * 2.599999904632568359375;
     float panelSpan = ((pixel / radius) * 0.15915493667125701904296875) * 16.0;
     float param = depth * 2.599999904632568359375;
@@ -1626,7 +1634,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     float panel = toEdge(param_1);
     float seam = fast::max(1.0 - smoothstep(ringSpan * 0.60000002384185791015625, ringSpan * 1.7999999523162841796875, ring), 1.0 - smoothstep(panelSpan * 0.60000002384185791015625, panelSpan * 1.7999999523162841796875, panel));
     float checker = mod(floor(depth * 2.599999904632568359375) + floor(twisted * 16.0), 2.0);
-    float param_2 = (depth * 0.0599999986588954925537109375) + (v_72.iTime * 0.0199999995529651641845703125);
+    float param_2 = (depth * 0.0599999986588954925537109375) + (_72.iTime * 0.0199999995529651641845703125);
     float3 hue = palette(param_2);
     float3 color = mix(float3(0.013500000350177288055419921875, 0.022500000894069671630859375, 0.063000001013278961181640625), float3(0.04500000178813934326171875, 0.07500000298023223876953125, 0.20999999344348907470703125), float3(checker));
     color += ((mix(float3(0.3499999940395355224609375, 0.949999988079071044921875, 1.0), hue, float3(0.550000011920928955078125)) * seam) * 1.25);
@@ -1636,12 +1644,12 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     fragColor = float4(color, 1.0);
 }
 
-fragment main0_out main0(constant Globals& v_72 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _72 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, v_72);
+    mainImage(param, param_1, _72);
     out._fragColor = param;
     return out;
 }
