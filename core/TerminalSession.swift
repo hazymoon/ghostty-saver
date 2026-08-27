@@ -58,9 +58,17 @@ public enum TerminalSession {
         }
         guard isatty(outputDescriptor) == 1 else { return false }
 
-        // A sink was named for output, so its tty is not necessarily the one
-        // replies come back on. Read where writing goes in that case.
-        let readFD = sinkPath == nil ? open("/dev/tty", O_RDONLY | O_NONBLOCK) : -1
+        // Opened by the tty's own path rather than as "/dev/tty": that name is
+        // a cloning device, and a descriptor from it answers poll with
+        // POLLNVAL here, which reads as "there is no reply coming" for every
+        // frame. ttyname gives the device behind the one already open.
+        //
+        // A sink was named for output when sinkPath is set, so its tty is not
+        // necessarily where replies come back. Read where writing goes then.
+        var readFD: Int32 = -1
+        if sinkPath == nil, let path = ttyname(outputDescriptor) {
+            readFD = open(path, O_RDONLY | O_NONBLOCK)
+        }
         inputDescriptor = readFD >= 0 ? readFD : outputDescriptor
         return true
     }
