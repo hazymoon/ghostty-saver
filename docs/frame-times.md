@@ -11,9 +11,42 @@ does every shader hold 60fps on the largest screen it is likely to meet?
 - One reply per frame (`q=0`), 60fps target
 - `ghostty-saver --stats --seconds 20 --shader <name>`, run in a Ghostty window
   rather than a tmux pane
+- **Window occluded for the whole run** - on another Space, or behind the
+  window being worked in. See "The window has to be visible" below: this
+  makes every figure in the table too slow, and the table is kept only until
+  it is measured again.
 - 2026-08-27
 
-## Results
+## The window has to be visible
+
+macOS throttles drawing for a window nobody can see, and Ghostty's renderer
+stops with it: its display link is stopped whenever the window is occluded or
+unfocused, and drawing goes with the link. What that does to the numbers, for
+the same shader at the same resolution over the same five minutes:
+
+| | occluded | visible on its own display |
+| --- | ---: | ---: |
+| effective fps | 41.58 | 59.99 |
+| GPU render mean | 14.130 ms | 6.369 ms |
+| terminal ack mean | 8.685 ms | 2.634 ms |
+| terminal ack max | 64.632 ms | 5.279 ms |
+
+The acknowledgement is what moves first, and the render time follows it,
+because both sides are drawing on the same GPU. The shader was `mystify`,
+which the table below has failing 60fps: that verdict is the measurement, not
+the shader.
+
+So visibility is a condition of the measurement, and it is written down as
+one. `Scripts/measure-frame-times.sh` holds the conditions rather than a
+person remembering to: it runs every shader in turn from the window it is
+started in, refuses a tmux pane and a window that is not frontmost, and flags
+a run whose resolution moved, that was cut short by a keypress, or whose
+acknowledgement tail looks like an occluded window. It prints this document's
+setup block and table, so re-measuring is a paste. A second display makes
+the run practical: keep the terminal full screen on one and work on the
+other.
+
+## Results (occluded - to be re-measured)
 
 GPU render, in ms:
 
@@ -29,9 +62,12 @@ GPU render, in ms:
 | toasters | 9.895 | 10.695 | 12.531 | 15.020 | 1.752 | 60.00 |
 | mystify | 11.915 | 11.808 | 17.202 | 41.176 | 3.323 | 57.89 |
 
-## Verdict
+## Verdict (from the occluded figures - provisional)
 
-**Eight of the nine hold 60fps. `mystify` does not, at 57.89.**
+**Eight of the nine hold 60fps. `mystify` does not, at 57.89.** That is what
+the table says, and the table was measured occluded: with the window
+visible, `mystify` holds 59.99 fps over five minutes. The verdict stands only
+until the table is measured again.
 
 - The transfer path is not what limits any of them. `gradient` sits exactly on
   the 60fps target with a 3.995 ms ack, so a shader has around 13 ms of the
@@ -54,6 +90,10 @@ run that was interrupted still prints a full-looking report. Twenty seconds at
 60fps is around 1200 frames; a run of 37 is 0.6 seconds of screensaver with
 the shader's first compile averaged into it, which is how `aurora` first
 measured at 11.581 ms - three times what it actually costs.
+
+**The window was visible, or the numbers are not comparable.** See "The
+window has to be visible" above; the ack maximum is the quickest tell, at
+several times its visible value when the window was occluded.
 
 **`GPU render` is not the shader alone.** It is the wall clock across a
 command buffer that waits for completion, on a GPU that is also compositing
