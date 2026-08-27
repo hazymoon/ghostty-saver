@@ -13,6 +13,10 @@ const int TRAIL = 12;
 const float TRAIL_STEP = 0.10;    // seconds between one trailing copy and the next
 const float LINE_WIDTH = 1.3;     // px, at the leading copy
 const float MARGIN = 0.04;        // how far the corners stay off the edges
+// How far from a polygon its glow is still worth drawing, in pixels. The glow
+// falls off as exp(-distance / 9px), so by 200px it is 1e-10 of its peak -
+// eleven orders of magnitude below the smallest step an 8-bit channel has.
+const float GLOW_REACH = 200.0;
 
 const float TAU = 6.28318;
 // The ribbon's colour cycle: where the three channels sit in it, how fast the
@@ -72,6 +76,15 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         vec3 hueSin = sin(angle);
 
         for (int step = 0; step < TRAIL; step++) {
+            // Each copy is drawn in the hue the leading edge had that long ago,
+            // which is where the ribbon's colour gradient comes from. Taken and
+            // rotated on at the top of the loop, so the early-out below cannot
+            // skip a copy's turn and put the rest of the trail out of step.
+            vec3 hue = 0.5 + 0.5 * hueCos;
+            vec3 turned = hueCos * stepCos + hueSin * stepSin;
+            hueSin = hueSin * stepCos - hueCos * stepSin;
+            hueCos = turned;
+
             float age = float(step) / float(TRAIL - 1);
             float t = iTime - float(step) * TRAIL_STEP;
 
@@ -83,6 +96,15 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                     mix(MARGIN, 1.0 - MARGIN, bounce(t * m.y + m.w))
                 );
             }
+
+            // Most of the screen is nowhere near this polygon, and the four
+            // segment distances below are what the shader spends its time on.
+            // The corners bound it, so a pixel further than the glow reaches
+            // from that box contributes nothing and can leave now.
+            vec2 lo = min(min(points[0], points[1]), min(points[2], points[3]));
+            vec2 hi = max(max(points[0], points[1]), max(points[2], points[3]));
+            vec2 outside = max(max(lo - p, p - hi), vec2(0.0));
+            if (length(outside) > pixel * GLOW_REACH) continue;
 
             // Closed polygon, the way Mystify draws it.
             float nearest = 1e9;
@@ -99,13 +121,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             float fade = (1.0 - age) * (1.0 - age);
             // Each copy is drawn in the hue the leading edge had that long ago,
             // which is where the ribbon's colour gradient comes from.
-            vec3 hue = 0.5 + 0.5 * hueCos;
             color += hue * (core + glow) * fade;
-
-            // Rotate back by one step, for the next copy along.
-            vec3 turned = hueCos * stepCos + hueSin * stepSin;
-            hueSin = hueSin * stepCos - hueCos * stepSin;
-            hueCos = turned;
         }
     }
 

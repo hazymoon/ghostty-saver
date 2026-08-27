@@ -758,7 +758,7 @@ struct Globals
     float3 iSelectionBackgroundColor;
 };
 
-constant spvUnsafeArray<float4, 8> _222 = spvUnsafeArray<float4, 8>({ float4(0.07386718690395355224609375, 0.12730468809604644775390625, 19.033203125, 18.828125), float4(0.1533203125, 0.14277343451976776123046875, 17.5, 13.369140625), float4(0.077031247317790985107421875, 0.1392578184604644775390625, 3.59375, 10.15625), float4(0.1262499988079071044921875, 0.084589846432209014892578125, 15.546875, 0.859375), float4(0.110561527311801910400390625, 0.1494531333446502685546875, 0.390625, 19.4921875), float4(0.087578125298023223876953125, 0.123964846134185791015625, 10.546875, 12.265625), float4(0.106562502682209014892578125, 0.12871094048023223876953125, 1.2109375, 1.69921875), float4(0.086874999105930328369140625, 0.14330078661441802978515625, 18.173828125, 2.890625) });
+constant spvUnsafeArray<float4, 8> _243 = spvUnsafeArray<float4, 8>({ float4(0.07386718690395355224609375, 0.12730468809604644775390625, 19.033203125, 18.828125), float4(0.1533203125, 0.14277343451976776123046875, 17.5, 13.369140625), float4(0.077031247317790985107421875, 0.1392578184604644775390625, 3.59375, 10.15625), float4(0.1262499988079071044921875, 0.084589846432209014892578125, 15.546875, 0.859375), float4(0.110561527311801910400390625, 0.1494531333446502685546875, 0.390625, 19.4921875), float4(0.087578125298023223876953125, 0.123964846134185791015625, 10.546875, 12.265625), float4(0.106562502682209014892578125, 0.12871094048023223876953125, 1.2109375, 1.69921875), float4(0.086874999105930328369140625, 0.14330078661441802978515625, 18.173828125, 2.890625) });
 
 struct main0_out
 {
@@ -797,14 +797,25 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         float3 hueSin = sin(angle);
         for (int _step = 0; _step < 12; _step++)
         {
+            float3 hue = float3(0.5) + (hueCos * 0.5);
+            float3 turned = (hueCos * stepCos) + (hueSin * stepSin);
+            hueSin = (hueSin * stepCos) - (hueCos * stepSin);
+            hueCos = turned;
             float age = float(_step) / 11.0;
             float t = _87.iTime - (float(_step) * 0.100000001490116119384765625);
             for (int i = 0; i < 4; i++)
             {
-                float4 m = _222[(shape * 4) + i];
+                float4 m = _243[(shape * 4) + i];
                 float param = (t * m.x) + m.z;
                 float param_1 = (t * m.y) + m.w;
                 points[i] = float2(mix(0.039999999105930328369140625, aspect - 0.039999999105930328369140625, bounce(param)), mix(0.039999999105930328369140625, 0.959999978542327880859375, bounce(param_1)));
+            }
+            float2 lo = fast::min(fast::min(points[0], points[1]), fast::min(points[2], points[3]));
+            float2 hi = fast::max(fast::max(points[0], points[1]), fast::max(points[2], points[3]));
+            float2 outside = fast::max(fast::max(lo - p, p - hi), float2(0.0));
+            if (length(outside) > (pixel * 200.0))
+            {
+                continue;
             }
             float nearest = 1000000000.0;
             for (int i_1 = 0; i_1 < 4; i_1++)
@@ -818,11 +829,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
             float core = smoothstep(width * 2.0, width * 0.5, nearest);
             float glow = exp((-nearest) / (pixel * 9.0)) * 0.300000011920928955078125;
             float fade = (1.0 - age) * (1.0 - age);
-            float3 hue = float3(0.5) + (hueCos * 0.5);
             color += ((hue * (core + glow)) * fade);
-            float3 turned = (hueCos * stepCos) + (hueSin * stepSin);
-            hueSin = (hueSin * stepCos) - (hueCos * stepSin);
-            hueCos = turned;
         }
     }
     color += float3(0.0199999995529651641845703125, 0.0199999995529651641845703125, 0.0500000007450580596923828125);
