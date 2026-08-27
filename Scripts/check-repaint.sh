@@ -44,6 +44,8 @@
 # @arg --shader NAME which shader (default gradient; anything darker weakens the reading)
 # @arg --keystroke   if still stale after the newline, type a key into the window
 # @arg --keep        leave the captures and logs behind and print where
+# @arg --out DIR     put the captures, logs and a copy of this output in DIR
+#                    (implies --keep), for a run nobody is watching
 #
 # @exitcode 0 the window showed the prompt again straight after the exit
 # @exitcode 1 the check could not be set up (permission, no window, no binary)
@@ -63,6 +65,7 @@ seconds=20
 shader=gradient
 keystroke=0
 keep=0
+out=
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -70,6 +73,7 @@ while [ $# -gt 0 ]; do
         --shader) shader="$2"; shift 2 ;;
         --keystroke) keystroke=1; shift ;;
         --keep) keep=1; shift ;;
+        --out) out="$2"; keep=1; shift 2 ;;
         -h | --help) sed -n '2,50p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 1 ;;
     esac
@@ -89,7 +93,15 @@ build_probe() {
 }
 build_probe
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/ghostty-saver-repaint.XXXXXXXX")"
+if [ -n "$out" ]; then
+    mkdir -p "$out"
+    work="$out"
+    # Everything printed from here on is also kept, with the exit status
+    # last, so the result survives the window it was printed in.
+    exec > >(tee "$work/report.txt") 2>&1
+else
+    work="$(mktemp -d "${TMPDIR:-/tmp}/ghostty-saver-repaint.XXXXXXXX")"
+fi
 spawned_pid=
 cleanup() {
     if [ -n "$spawned_pid" ]; then kill "$spawned_pid" 2> /dev/null || true; fi
@@ -98,8 +110,9 @@ cleanup() {
     else
         rm -r -- "$work" 2> /dev/null || true
     fi
+    if [ -n "$out" ]; then echo "exit status $status" >> "$work/report.txt"; fi
 }
-trap cleanup EXIT
+trap 'status=$?; cleanup' EXIT
 
 # Permission first, on a window of the terminal this runs in, before a
 # window is opened that would be left behind by a failure here. Any window
