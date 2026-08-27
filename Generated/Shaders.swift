@@ -750,7 +750,7 @@ struct Globals
     float3 iSelectionBackgroundColor;
 };
 
-constant spvUnsafeArray<float4, 8> _246 = spvUnsafeArray<float4, 8>({ float4(0.07386718690395355224609375, 0.12730468809604644775390625, 19.033203125, 18.828125), float4(0.1533203125, 0.14277343451976776123046875, 17.5, 13.369140625), float4(0.077031247317790985107421875, 0.1392578184604644775390625, 3.59375, 10.15625), float4(0.1262499988079071044921875, 0.084589846432209014892578125, 15.546875, 0.859375), float4(0.110561527311801910400390625, 0.1494531333446502685546875, 0.390625, 19.4921875), float4(0.087578125298023223876953125, 0.123964846134185791015625, 10.546875, 12.265625), float4(0.106562502682209014892578125, 0.12871094048023223876953125, 1.2109375, 1.69921875), float4(0.086874999105930328369140625, 0.14330078661441802978515625, 18.173828125, 2.890625) });
+constant spvUnsafeArray<float4, 8> _169 = spvUnsafeArray<float4, 8>({ float4(0.07386718690395355224609375, 0.12730468809604644775390625, 19.033203125, 18.828125), float4(0.1533203125, 0.14277343451976776123046875, 17.5, 13.369140625), float4(0.077031247317790985107421875, 0.1392578184604644775390625, 3.59375, 10.15625), float4(0.1262499988079071044921875, 0.084589846432209014892578125, 15.546875, 0.859375), float4(0.110561527311801910400390625, 0.1494531333446502685546875, 0.390625, 19.4921875), float4(0.087578125298023223876953125, 0.123964846134185791015625, 10.546875, 12.265625), float4(0.106562502682209014892578125, 0.12871094048023223876953125, 1.2109375, 1.69921875), float4(0.086874999105930328369140625, 0.14330078661441802978515625, 18.173828125, 2.890625) });
 
 struct main0_out
 {
@@ -780,55 +780,74 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     float2 p = fragCoord / float2(_90.iResolution[1u]);
     float pixel = 1.0 / _90.iResolution[1u];
     float3 color = float3(0.0);
+    float2 fastest = float2(0.0);
+    for (int i = 0; i < 8; i++)
+    {
+        fastest = fast::max(fastest, _169[i].xy);
+    }
+    float outlineMove = 0.100000001490116119384765625 * length(fastest * float2(aspect - 0.07999999821186065673828125, 0.920000016689300537109375));
+    float reach = pixel * 80.0;
     float stepCos = 0.9949510097503662109375;
     float stepSin = 0.10036163032054901123046875;
     spvUnsafeArray<float2, 4> points;
-    int _347;
+    int _395;
     for (int shape = 0; shape < 2; shape++)
     {
         float3 angle = (float3((_90.iTime * 0.04500000178813934326171875) + (float(shape) * 0.5)) + float3(0.0, 0.3300000131130218505859375, 0.670000016689300537109375)) * 6.28318023681640625;
         float3 hueCos = cos(angle);
         float3 hueSin = sin(angle);
+        float carried = 0.0;
         for (int _step = 0; _step < 11; _step++)
         {
             float3 hue = float3(0.5) + (hueCos * 0.5);
             float3 turned = (hueCos * stepCos) + (hueSin * stepSin);
             hueSin = (hueSin * stepCos) - (hueCos * stepSin);
             hueCos = turned;
+            if (_step > 0)
+            {
+                carried -= outlineMove;
+                if (carried > reach)
+                {
+                    continue;
+                }
+            }
             float age = float(_step) / 11.0;
             float t = _90.iTime - (float(_step) * 0.100000001490116119384765625);
-            for (int i = 0; i < 4; i++)
+            for (int i_1 = 0; i_1 < 4; i_1++)
             {
-                float4 m = _246[(shape * 4) + i];
+                float4 m = _169[(shape * 4) + i_1];
                 float param = (t * m.x) + m.z;
                 float param_1 = (t * m.y) + m.w;
-                points[i] = float2(mix(0.039999999105930328369140625, aspect - 0.039999999105930328369140625, bounce(param)), mix(0.039999999105930328369140625, 0.959999978542327880859375, bounce(param_1)));
+                points[i_1] = float2(mix(0.039999999105930328369140625, aspect - 0.039999999105930328369140625, bounce(param)), mix(0.039999999105930328369140625, 0.959999978542327880859375, bounce(param_1)));
             }
             float2 lo = fast::min(fast::min(points[0], points[1]), fast::min(points[2], points[3]));
             float2 hi = fast::max(fast::max(points[0], points[1]), fast::max(points[2], points[3]));
             float2 outside = fast::max(fast::max(lo - p, p - hi), float2(0.0));
-            if (length(outside) > (pixel * 80.0))
+            float boxAway = length(outside);
+            if (boxAway > reach)
             {
+                carried = boxAway;
                 continue;
             }
             float nearestSquared = 1000000000.0;
-            for (int i_1 = 0; i_1 < 4; i_1++)
+            for (int i_2 = 0; i_2 < 4; i_2++)
             {
-                if ((i_1 + 1) == 4)
+                if ((i_2 + 1) == 4)
                 {
-                    _347 = 0;
+                    _395 = 0;
                 }
                 else
                 {
-                    _347 = i_1 + 1;
+                    _395 = i_2 + 1;
                 }
-                int next = _347;
+                int next = _395;
                 float2 param_2 = p;
-                float2 param_3 = points[i_1];
+                float2 param_3 = points[i_2];
                 float2 param_4 = points[next];
                 nearestSquared = fast::min(nearestSquared, segmentDistanceSquared(param_2, param_3, param_4));
             }
             float nearest = sqrt(nearestSquared);
+            carried = nearest;
             float width = (pixel * 1.2999999523162841796875) * mix(1.0, 0.550000011920928955078125, age);
             float core = smoothstep(width * 2.0, width * 0.5, nearest);
             float glow = exp((-nearest) / (pixel * 9.0)) * 0.300000011920928955078125;

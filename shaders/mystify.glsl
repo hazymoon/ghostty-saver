@@ -70,6 +70,18 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     vec3 color = vec3(0.0);
 
+    // How far a polygon's outline can move from one copy to the next. Every
+    // point of it is a blend of two corners, so none of it travels further
+    // than the fastest corner does; bounce() has slope 1, so a corner covers
+    // its rate times the span it crosses, every second.
+    vec2 fastest = vec2(0.0);
+    for (int i = 0; i < SHAPES * CORNERS; i++) {
+        fastest = max(fastest, MOTION[i].xy);
+    }
+    float outlineMove = TRAIL_STEP
+        * length(fastest * vec2(aspect - 2.0 * MARGIN, 1.0 - 2.0 * MARGIN));
+    float reach = pixel * GLOW_REACH;
+
     // One trailing copy's hue is the next one's rotated by a fixed angle, so
     // the trail can be walked with a rotation instead of a cosine per copy.
     // The hue does not depend on the pixel, and a cosine of a vec3 twelve times
@@ -81,6 +93,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         vec3 angle = TAU * (iTime * HUE_RATE + float(shape) * 0.5 + HUE_PHASE);
         vec3 hueCos = cos(angle);
         vec3 hueSin = sin(angle);
+        // A lower bound on how far this pixel is from the copy about to be
+        // drawn, carried forward from the one before it.
+        float carried = 0.0;
 
         // age reaches 1 on the last copy, and fade is its square complement,
         // so that copy is drawn at zero: TRAIL is where the ribbon fades out,
@@ -94,6 +109,15 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             vec3 turned = hueCos * stepCos + hueSin * stepSin;
             hueSin = hueSin * stepCos - hueCos * stepSin;
             hueCos = turned;
+
+            // The outline cannot have moved further than outlineMove, so what
+            // the previous copy was found to be from this pixel bounds what
+            // this one can be. A pixel the bound holds outside the glow's
+            // reach can leave before its corners are worked out at all.
+            if (step > 0) {
+                carried -= outlineMove;
+                if (carried > reach) continue;
+            }
 
             float age = float(step) / float(TRAIL - 1);
             float t = iTime - float(step) * TRAIL_STEP;
@@ -114,7 +138,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             vec2 lo = min(min(points[0], points[1]), min(points[2], points[3]));
             vec2 hi = max(max(points[0], points[1]), max(points[2], points[3]));
             vec2 outside = max(max(lo - p, p - hi), vec2(0.0));
-            if (length(outside) > pixel * GLOW_REACH) continue;
+            float boxAway = length(outside);
+            if (boxAway > reach) {
+                carried = boxAway;
+                continue;
+            }
 
             // Closed polygon, the way Mystify draws it.
             float nearestSquared = 1e9;
@@ -126,6 +154,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                 nearestSquared = min(nearestSquared, segmentDistanceSquared(p, points[i], points[next]));
             }
             float nearest = sqrt(nearestSquared);
+            carried = nearest;
 
             // Older copies are thinner as well as dimmer, so the ribbon tapers
             // instead of reading as a stack of equal outlines.
