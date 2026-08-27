@@ -106,6 +106,27 @@ struct RenderedFrame {
         }
         return highest
     }
+
+    /// Fraction of pixels that differ from another frame by more than `levels`
+    /// in some channel. Asking for a margin rather than for any difference at
+    /// all is what separates a shader that moves from one that lands a step of
+    /// quantisation away from where it was.
+    func fractionDiffering(from other: RenderedFrame, byMoreThan levels: Int) -> Double {
+        precondition(width == other.width && height == other.height)
+        var moved = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = y * bytesPerRow + x * 4
+                let otherOffset = y * other.bytesPerRow + x * 4
+                for channel in 0..<3 where
+                    abs(Int(pixels[offset + channel]) - Int(other.pixels[otherOffset + channel])) > levels {
+                    moved += 1
+                    break
+                }
+            }
+        }
+        return Double(moved) / Double(width * height)
+    }
 }
 
 /// Every shader the catalog carries, by name. A file-scope constant because
@@ -140,15 +161,21 @@ struct ShaderInvariantTests {
     }
 
     /// Everything is derived from iTime, so a different iTime has to produce a
-    /// different frame. A shader that ignored time would still pass every
-    /// other check here.
+    /// visibly different frame. A shader that ignored time would still pass
+    /// every other check here.
+    ///
+    /// The margin is the point. Asking only that the two frames differ is a
+    /// check a shader can pass by moving a single step of quantisation, which
+    /// is what gradient.glsl does over a pair of times four seconds apart on
+    /// the flat of its sine.
     @Test("the frame changes over time", arguments: shaderNames)
     func animatesOverTime(name: String) throws {
         guard let first = try RenderedFrame.make(named: name, width: 256, height: 192, time: 2.0),
-              let second = try RenderedFrame.make(named: name, width: 256, height: 192, time: 9.0) else {
+              let second = try RenderedFrame.make(named: name, width: 256, height: 192, time: 6.0) else {
             return
         }
-        #expect(first.pixels != second.pixels)
+        let moved = first.fractionDiffering(from: second, byMoreThan: 8)
+        #expect(moved > 0.02, "\(name) barely moves between the two times (\(moved) of the frame)")
     }
 
     /// A shader tuned to one resolution tends to draw nothing, or a flat wash,
@@ -239,13 +266,20 @@ struct ShaderAppearanceTests {
         guard let narrow = try RenderedFrame.make(named: "starwars", width: 480, height: 480, time: 132.0) else {
             return
         }
-        // Nothing bright should reach the left or right edge: the widest line
-        // is meant to stop short of them.
+        // No crawl ink should reach the left or right edge: the widest line is
+        // meant to stop short of them.
+        //
+        // The blue test is what makes this about the text. The stars are
+        // bright and go right to the edge, and they are white - so it is the
+        // lack of blue, not the brightness, that says a pixel is yellow.
         var edgeInk = 0
         for y in 0..<narrow.height {
             for x in [0, 1, narrow.width - 2, narrow.width - 1] {
                 let offset = y * narrow.bytesPerRow + x * 4
-                if narrow.pixels[offset] > 90 && narrow.pixels[offset + 1] > 60 { edgeInk += 1 }
+                let red = Int(narrow.pixels[offset])
+                let green = Int(narrow.pixels[offset + 1])
+                let blue = Int(narrow.pixels[offset + 2])
+                if red > 90 && green > 60 && blue * 2 < red { edgeInk += 1 }
             }
         }
         #expect(edgeInk == 0, "\(edgeInk) crawl pixels are running off the edge")
