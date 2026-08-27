@@ -410,8 +410,6 @@ while !stopped {
 
 let elapsed = monotonicNow() - startedAt
 
-// The reply to the last frame is still unread when a keypress ends the loop.
-TerminalSession.discardPendingInput()
 TerminalSession.restore()
 
 if options.stats {

@@ -3,7 +3,7 @@ import Testing
 
 @testable import SaverCore
 
-@Suite("terminal drain")
+@Suite("waiting for the terminal's last reply")
 struct TerminalDrainTests {
     /// A pty whose slave is in raw mode, so a test can put bytes in front of a
     /// reader the way a terminal does.
@@ -11,7 +11,7 @@ struct TerminalDrainTests {
         let master: Int32
         let slave: Int32
 
-        init?(minimumRead: cc_t) {
+        init?() {
             let master = posix_openpt(O_RDWR | O_NOCTTY)
             guard master >= 0, grantpt(master) == 0, unlockpt(master) == 0,
                   let name = ptsname(master) else { return nil }
@@ -23,8 +23,8 @@ struct TerminalDrainTests {
                 Darwin.close(master); Darwin.close(slave); return nil
             }
             cfmakeraw(&raw)
-            raw.c_cc.16 = minimumRead   // VMIN
-            raw.c_cc.17 = 0             // VTIME
+            raw.c_cc.16 = 1   // VMIN
+            raw.c_cc.17 = 0   // VTIME
             guard tcsetattr(slave, TCSANOW, &raw) == 0 else {
                 Darwin.close(master); Darwin.close(slave); return nil
             }
@@ -33,59 +33,67 @@ struct TerminalDrainTests {
             self.slave = slave
         }
 
+        func send(_ text: String) {
+            let bytes = Array(text.utf8)
+            _ = bytes.withUnsafeBufferPointer { write(master, $0.baseAddress, $0.count) }
+        }
+
+        var hasQueuedInput: Bool {
+            var pfd = pollfd(fd: slave, events: Int16(POLLIN), revents: 0)
+            return poll(&pfd, 1, 500) == 1 && pfd.revents & Int16(POLLIN) != 0
+        }
+
         func close() {
             Darwin.close(master)
             Darwin.close(slave)
         }
     }
 
-    /// Runs the drain on a thread so a hang fails the test instead of hanging
-    /// the suite. The thread is left behind if it never returns, which is the
-    /// price of catching a read that never comes back.
-    private func drainCompletes(fd: Int32, within seconds: Double) -> Bool {
+    /// Runs the wait on a thread, so a call that never comes back fails the
+    /// test rather than hanging the suite. The thread is left behind if that
+    /// happens, which is the price of catching it at all.
+    private func completes(fd: Int32, within seconds: Double) -> Bool {
         let done = DispatchSemaphore(value: 0)
         Thread.detachNewThread {
-            TerminalSession.drainBriefly(fd: fd)
+            TerminalSession.awaitPendingInput(fd: fd)
             done.signal()
         }
         return done.wait(timeout: .now() + seconds) == .success
     }
 
-    /// The terminal's reply to the last frame is what the drain is for: it has
-    /// to be taken out of the queue before termios is restored, or it lands on
-    /// the shell prompt.
-    @Test("it takes what the terminal sent")
-    func drainsPendingBytes() throws {
-        let pty = try #require(Pty(minimumRead: 1))
+    /// The reply must still be in the queue afterwards: restore() discards it
+    /// with TCSAFLUSH, and reading it here instead is what used to park the
+    /// whole screensaver on a read that never returned.
+    @Test("it leaves the reply for the flush to discard")
+    func leavesTheQueueAlone() throws {
+        let pty = try #require(Pty())
         defer { pty.close() }
 
-        let reply = Array("\u{1b}_Gi=1;OK\u{1b}\\".utf8)
-        _ = reply.withUnsafeBufferPointer { write(pty.master, $0.baseAddress, $0.count) }
+        pty.send("\u{1b}_Gi=1;OK\u{1b}\\")
+        #expect(pty.hasQueuedInput, "the reply should reach the queue")
 
-        #expect(drainCompletes(fd: pty.slave, within: 2.0))
-
-        var pfd = pollfd(fd: pty.slave, events: Int16(POLLIN), revents: 0)
-        #expect(poll(&pfd, 1, 0) == 0, "the reply should be gone from the queue")
+        #expect(completes(fd: pty.slave, within: 2.0))
+        #expect(pty.hasQueuedInput, "the reply should still be there to flush")
     }
 
-    /// Nothing queued: the drain has to give up on its own rather than sit on
-    /// a read. It runs after the render loop, so a read that never returns
-    /// stops the screensaver with the last frame up and nothing printed.
-    @Test("it gives up when the terminal sent nothing")
-    func drainsNothingPromptly() throws {
-        let pty = try #require(Pty(minimumRead: 1))
+    /// A terminal that answers nothing must not hold the exit path open.
+    @Test("it gives up when nothing arrives")
+    func givesUp() throws {
+        let pty = try #require(Pty())
         defer { pty.close() }
 
-        #expect(drainCompletes(fd: pty.slave, within: 2.0))
+        let start = monotonicNow()
+        #expect(completes(fd: pty.slave, within: 2.0))
+        #expect(monotonicNow() - start < 1.0)
     }
 
     /// A poll that reports something other than readable - a closed or errored
-    /// descriptor - must not be taken as a byte to read.
-    @Test("it does not treat a dead descriptor as something to read")
+    /// descriptor - is not a byte to wait on either.
+    @Test("it gives up on a dead descriptor")
     func deadDescriptor() throws {
-        let pty = try #require(Pty(minimumRead: 1))
+        let pty = try #require(Pty())
         pty.close()
 
-        #expect(drainCompletes(fd: pty.slave, within: 2.0))
+        #expect(completes(fd: pty.slave, within: 2.0))
     }
 }
