@@ -309,6 +309,12 @@ pinned, and how tmux behaves.
 `docs/frame-times.md` is what every shader measures on a 4K screen, and the
 conditions a measurement has to meet to mean anything.
 
+`docs/spec-constants.md` answers whether a shader's tunables can be declared as
+specialization constants and set from the host: they can, but only behind a
+macro this build defines and Ghostty does not, because Ghostty builds a
+custom-shader's fragment function without constant values and Metal aborts on
+one that has them unset.
+
 ## License
 
 MIT. See `LICENSE`.
