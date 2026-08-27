@@ -306,8 +306,8 @@ approach, along with the Ghostty implementation details the design depends on:
 why every frame needs a fresh shared memory name, why a placement id must be
 pinned, and how tmux behaves.
 
-`docs/frame-times.md` is what every shader measures on a 4K screen, and what
-holds them back.
+`docs/frame-times.md` is what every shader measures on a 4K screen, and the
+conditions a measurement has to meet to mean anything.
 
 ## License
 
