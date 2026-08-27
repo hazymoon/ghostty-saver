@@ -1064,7 +1064,7 @@ float ink(thread const float& column, thread const float& line)
     bool _339;
     if (!_331)
     {
-        _339 = inner.x > 1.0;
+        _339 = inner.x >= 1.0;
     }
     else
     {
@@ -1082,7 +1082,7 @@ float ink(thread const float& column, thread const float& line)
     bool _354;
     if (!_347)
     {
-        _354 = inner.y > 1.0;
+        _354 = inner.y >= 1.0;
     }
     else
     {

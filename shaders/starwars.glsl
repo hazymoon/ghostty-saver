@@ -140,7 +140,9 @@ float ink(float column, float line) {
     if (bits == 0u) { return 0.0; }
 
     vec2 inner = (vec2(fract(column), fract(line)) - GLYPH_ORIGIN) / GLYPH_SIZE;
-    if (inner.x < 0.0 || inner.x > 1.0 || inner.y < 0.0 || inner.y > 1.0) { return 0.0; }
+    // Half-open on the top end: an inner that rounds to exactly 1.0 would put
+    // the bit index at (5, 6) and the shift at 35, past the width of bits.
+    if (inner.x < 0.0 || inner.x >= 1.0 || inner.y < 0.0 || inner.y >= 1.0) { return 0.0; }
 
     ivec2 bit = ivec2(floor(inner * vec2(5.0, 6.0)));
     return float((bits >> uint(bit.y * 5 + bit.x)) & 1u);
