@@ -95,7 +95,9 @@ build_probe
 
 if [ -n "$out" ]; then
     mkdir -p "$out"
-    work="$out"
+    # Absolute: the script in the new window runs from wherever Ghostty
+    # starts it, and a relative path would name a directory there.
+    work="$(cd "$out" && pwd)"
     # Everything printed from here on is also kept, with the exit status
     # last, so the result survives the window it was printed in.
     exec > >(tee "$work/report.txt") 2>&1
