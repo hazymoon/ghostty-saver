@@ -6,23 +6,55 @@ does every shader hold 60fps on the largest screen it is likely to meet?
 
 ## Setup
 
-- Apple M4 Pro, macOS 26.6
-- Ghostty full screen on a 4K display: 3832 x 2152 px, 31.46 MiB per frame
+- Apple M4 Pro, macOS 26.6.2
+- Ghostty 1.3.1 in a window covering a 4K display below the menu bar:
+  3832 x 1936 px, 28.30 MiB per frame
+- Window visible on its own display and frontmost for the whole run, nothing
+  else drawing on the machine (checked from the window server by
+  `Scripts/measure-frame-times.sh`, which produced this section)
 - One reply per frame (`q=0`), 60fps target
-- `ghostty-saver --stats --seconds 20 --shader <name>`, run in a Ghostty window
-  rather than a tmux pane
-- **Window occluded for the whole run** - on another Space, or behind the
-  window being worked in. See "The window has to be visible" below: this
-  makes every figure in the table too slow, and the table is kept only until
-  it is measured again.
+- `ghostty-saver --stats --seconds 300 --shader <name>`, run in a Ghostty
+  window rather than a tmux pane
 - 2026-08-27
+
+## Results
+
+GPU render, in ms:
+
+| shader | mean | p50 | p95 | max | terminal ack (mean) | effective fps |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| synthwave | 2.208 | 1.663 | 4.656 | 13.590 | 2.591 | 60.00 |
+| gradient | 2.455 | 1.764 | 6.022 | 13.795 | 2.655 | 60.00 |
+| starwars | 2.686 | 2.282 | 4.749 | 12.581 | 2.639 | 60.00 |
+| hyperspace | 3.955 | 3.599 | 6.649 | 12.614 | 2.658 | 60.00 |
+| tunnel | 4.693 | 4.134 | 9.311 | 15.549 | 2.566 | 60.00 |
+| matrix | 5.027 | 4.844 | 7.791 | 16.788 | 2.465 | 60.00 |
+| aurora | 6.167 | 5.789 | 9.497 | 18.155 | 2.553 | 60.00 |
+| mystify | 6.425 | 6.143 | 8.949 | 20.567 | 2.527 | 60.00 |
+| toasters | 6.818 | 6.266 | 11.127 | 18.298 | 2.530 | 60.00 |
+
+## Verdict
+
+**All nine hold 60fps, over five minutes each.**
+
+- The transfer path is not what limits any of them. The acknowledgement sits
+  between 2.5 and 2.7 ms whatever the shader, so a shader has around 14 ms of
+  the 16.7 ms to work in and nothing else is in the way.
+- The heaviest, `toasters`, spends 6.8 ms on average and 11.1 ms at its p95;
+  its worst frame in eighteen thousand, 18.3 ms, is the only one over budget.
+- `mystify` is not the outlier the occluded figures made it. It costs about
+  the same as `aurora`, and the six changes to it described in `README.md`
+  under "Staying inside the frame" are what brought it there from the 15.4 ms
+  it started at.
 
 ## The window has to be visible
 
 macOS throttles drawing for a window nobody can see, and Ghostty's renderer
 stops with it: its display link is stopped whenever the window is occluded or
-unfocused, and drawing goes with the link. What that does to the numbers, for
-the same shader at the same resolution over the same five minutes:
+unfocused, and drawing goes with the link. The first version of this document
+was measured with the window occluded - on another Space, or behind the
+window being worked in - and every figure in it was too slow. The same
+shader at the same resolution over the same five minutes:
 
 | | occluded | visible on its own display |
 | --- | ---: | ---: |
@@ -33,55 +65,21 @@ the same shader at the same resolution over the same five minutes:
 
 The acknowledgement is what moves first, and the render time follows it,
 because both sides are drawing on the same GPU. The shader was `mystify`,
-which the table below has failing 60fps: that verdict is the measurement, not
-the shader.
+which the occluded table had failing 60fps at 57.89: that verdict was the
+measurement, not the shader.
+
+Anything else drawing on the same GPU does the same in a smaller way. A run
+that overlapped a second Ghostty window at 60fps had its acknowledgement p95
+at 6 to 8 ms against the 2.7 to 2.9 ms above, and `aurora` at 58.96 fps.
 
 So visibility is a condition of the measurement, and it is written down as
 one. `Scripts/measure-frame-times.sh` holds the conditions rather than a
 person remembering to: it runs every shader in turn from the window it is
 started in, refuses a tmux pane and a window that is not frontmost, and flags
 a run whose resolution moved, that was cut short by a keypress, or whose
-acknowledgement tail looks like an occluded window. It prints this document's
-setup block and table, so re-measuring is a paste. A second display makes
-the run practical: keep the terminal full screen on one and work on the
-other.
-
-## Results (occluded - to be re-measured)
-
-GPU render, in ms:
-
-| shader | mean | p50 | p95 | max | terminal ack (mean) | effective fps |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| gradient | 2.513 | 2.422 | 3.391 | 5.545 | 3.995 | 59.99 |
-| synthwave | 2.594 | 2.374 | 4.217 | 10.411 | 3.083 | 59.99 |
-| hyperspace | 3.438 | 3.325 | 4.749 | 10.455 | 2.155 | 59.99 |
-| starwars | 3.850 | 3.744 | 4.941 | 8.483 | 2.823 | 59.99 |
-| tunnel | 4.143 | 3.599 | 6.391 | 46.071 | 4.414 | 59.89 |
-| matrix | 5.831 | 5.675 | 7.056 | 10.860 | 3.103 | 60.00 |
-| aurora | 6.471 | 6.519 | 7.638 | 16.576 | 2.177 | 60.00 |
-| toasters | 9.895 | 10.695 | 12.531 | 15.020 | 1.752 | 60.00 |
-| mystify | 11.915 | 11.808 | 17.202 | 41.176 | 3.323 | 57.89 |
-
-## Verdict (from the occluded figures - provisional)
-
-**Eight of the nine hold 60fps. `mystify` does not, at 57.89.** That is what
-the table says, and the table was measured occluded: with the window
-visible, `mystify` holds 59.99 fps over five minutes. The verdict stands only
-until the table is measured again.
-
-- The transfer path is not what limits any of them. `gradient` sits exactly on
-  the 60fps target with a 3.995 ms ack, so a shader has around 13 ms of the
-  16.7 ms to work in and nothing else is in the way.
-- What costs `mystify` its frames is not its mean. Its frame adds up to
-  15.27 ms, which fits; its p95 render alone is 17.202 ms, which does not.
-  `aurora` and `toasters` cost nearly as much on average and keep 60fps
-  because their slow frames stay near their typical ones - `aurora`'s p95 is
-  1.2x its mean, `mystify`'s is 1.4x.
-- `mystify` started this measurement at 15.401 ms and 54.12 fps. Six changes
-  to the shader took it to 11.915 ms without changing what it draws; the
-  remaining gap is that its tail moves with whatever else is on the GPU, which
-  the shader cannot do anything about. `README.md` has what those changes
-  were, under "Staying inside the frame".
+acknowledgement p95 is above 5 ms. It prints this document's setup block and
+table, so re-measuring is a paste. A second display makes the run practical:
+keep the terminal on one and leave the machine alone.
 
 ## How to read the numbers
 
@@ -92,14 +90,15 @@ the shader's first compile averaged into it, which is how `aurora` first
 measured at 11.581 ms - three times what it actually costs.
 
 **The window was visible, or the numbers are not comparable.** See "The
-window has to be visible" above; the ack maximum is the quickest tell, at
-several times its visible value when the window was occluded.
+window has to be visible" above; the acknowledgement p95 is the quickest
+tell, at two to three times its undisturbed value when anything else was
+drawing.
 
 **`GPU render` is not the shader alone.** It is the wall clock across a
 command buffer that waits for completion, on a GPU that is also compositing
-Ghostty's window and putting a 31.46 MiB image into it every frame. Rendering
+Ghostty's window and putting a 28.30 MiB image into it every frame. Rendering
 the same shader with nothing else running measures `mystify` at 4.803 ms
-against the 11.915 ms here. The number to design against is this one; the
+against the 6.425 ms here. The number to design against is this one; the
 quiet one says how much of it is the shader.
 
 **The ack is the terminal's parse, not its paint.** As in the transport
