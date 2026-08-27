@@ -14,9 +14,12 @@ const float TRAIL_STEP = 0.10;    // seconds between one trailing copy and the n
 const float LINE_WIDTH = 1.3;     // px, at the leading copy
 const float MARGIN = 0.04;        // how far the corners stay off the edges
 // How far from a polygon its glow is still worth drawing, in pixels. The glow
-// falls off as exp(-distance / 9px), so by 200px it is 1e-10 of its peak -
-// eleven orders of magnitude below the smallest step an 8-bit channel has.
-const float GLOW_REACH = 200.0;
+// falls off as exp(-distance / 9px) from a peak of 0.3, and 24 copies are
+// drawn, so even if every one of them were this far away their sum stays
+// under half of what an 8-bit channel can hold at 74px. Rounded up from
+// there, since the box this bounds is cheap to widen and expensive to get
+// wrong.
+const float GLOW_REACH = 80.0;
 
 const float TAU = 6.28318;
 // The ribbon's colour cycle: where the three channels sit in it, how fast the
@@ -47,11 +50,15 @@ float bounce(float x) {
     return abs(fract(x * 0.5) * 2.0 - 1.0);
 }
 
-float segmentDistance(vec2 p, vec2 a, vec2 b) {
+// Squared, so that the four sides can be compared without a square root
+// each. Only the winner needs the root taken, which is 24 of them a pixel
+// rather than 96.
+float segmentDistanceSquared(vec2 p, vec2 a, vec2 b) {
     vec2 pa = p - a;
     vec2 ba = b - a;
     float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0.0, 1.0);
-    return length(pa - ba * h);
+    vec2 offset = pa - ba * h;
+    return dot(offset, offset);
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
@@ -107,10 +114,15 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             if (length(outside) > pixel * GLOW_REACH) continue;
 
             // Closed polygon, the way Mystify draws it.
-            float nearest = 1e9;
+            float nearestSquared = 1e9;
             for (int i = 0; i < CORNERS; i++) {
-                nearest = min(nearest, segmentDistance(p, points[i], points[(i + 1) % CORNERS]));
+                // Wrapping with a conditional rather than a modulo: the
+                // converter turns "% CORNERS" into a signed-remainder helper,
+                // and an integer division 96 times a pixel is not free.
+                int next = i + 1 == CORNERS ? 0 : i + 1;
+                nearestSquared = min(nearestSquared, segmentDistanceSquared(p, points[i], points[next]));
             }
+            float nearest = sqrt(nearestSquared);
 
             // Older copies are thinner as well as dimmer, so the ribbon tapers
             // instead of reading as a stack of equal outlines.
