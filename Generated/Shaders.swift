@@ -758,16 +758,12 @@ struct Globals
     float3 iSelectionBackgroundColor;
 };
 
+constant spvUnsafeArray<float4, 8> _214 = spvUnsafeArray<float4, 8>({ float4(0.07386718690395355224609375, 0.12730468809604644775390625, 19.033203125, 18.828125), float4(0.1533203125, 0.14277343451976776123046875, 17.5, 13.369140625), float4(0.077031247317790985107421875, 0.1392578184604644775390625, 3.59375, 10.15625), float4(0.1262499988079071044921875, 0.084589846432209014892578125, 15.546875, 0.859375), float4(0.110561527311801910400390625, 0.1494531333446502685546875, 0.390625, 19.4921875), float4(0.087578125298023223876953125, 0.123964846134185791015625, 10.546875, 12.265625), float4(0.106562502682209014892578125, 0.12871094048023223876953125, 1.2109375, 1.69921875), float4(0.086874999105930328369140625, 0.14330078661441802978515625, 18.173828125, 2.890625) });
+
 struct main0_out
 {
     float4 _fragColor [[color(0)]];
 };
-
-static inline __attribute__((always_inline))
-float hash11(thread const float& n)
-{
-    return fract(sin(n) * 43758.546875);
-}
 
 static inline __attribute__((always_inline))
 float bounce(thread const float& x)
@@ -791,51 +787,40 @@ float3 palette(thread const float& t)
 }
 
 static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _115)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _105)
 {
-    float aspect = _115.iResolution[0u] / _115.iResolution[1u];
-    float2 p = fragCoord / float2(_115.iResolution[1u]);
-    float pixel = 1.0 / _115.iResolution[1u];
+    float aspect = _105.iResolution[0u] / _105.iResolution[1u];
+    float2 p = fragCoord / float2(_105.iResolution[1u]);
+    float pixel = 1.0 / _105.iResolution[1u];
     float3 color = float3(0.0);
-    spvUnsafeArray<float4, 4> motion;
     spvUnsafeArray<float2, 4> points;
     for (int shape = 0; shape < 2; shape++)
     {
-        float shapeSeed = (float(shape) * 41.0) + 3.0;
-        for (int i = 0; i < 4; i++)
-        {
-            float s = shapeSeed + (float(i) * 7.13000011444091796875);
-            float param = s * 1.71000003814697265625;
-            float param_1 = s * 3.36999988555908203125;
-            float param_2 = s * 5.190000057220458984375;
-            float param_3 = s * 7.769999980926513671875;
-            motion[i] = float4(0.070000000298023223876953125 + (0.0900000035762786865234375 * hash11(param)), 0.070000000298023223876953125 + (0.0900000035762786865234375 * hash11(param_1)), hash11(param_2) * 20.0, hash11(param_3) * 20.0);
-        }
         for (int _step = 0; _step < 12; _step++)
         {
             float age = float(_step) / 11.0;
-            float t = _115.iTime - (float(_step) * 0.100000001490116119384765625);
-            for (int i_1 = 0; i_1 < 4; i_1++)
+            float t = _105.iTime - (float(_step) * 0.100000001490116119384765625);
+            for (int i = 0; i < 4; i++)
             {
-                float4 m = motion[i_1];
-                float param_4 = (t * m.x) + m.z;
-                float param_5 = (t * m.y) + m.w;
-                points[i_1] = float2(mix(0.039999999105930328369140625, aspect - 0.039999999105930328369140625, bounce(param_4)), mix(0.039999999105930328369140625, 0.959999978542327880859375, bounce(param_5)));
+                float4 m = _214[(shape * 4) + i];
+                float param = (t * m.x) + m.z;
+                float param_1 = (t * m.y) + m.w;
+                points[i] = float2(mix(0.039999999105930328369140625, aspect - 0.039999999105930328369140625, bounce(param)), mix(0.039999999105930328369140625, 0.959999978542327880859375, bounce(param_1)));
             }
             float nearest = 1000000000.0;
-            for (int i_2 = 0; i_2 < 4; i_2++)
+            for (int i_1 = 0; i_1 < 4; i_1++)
             {
-                float2 param_6 = p;
-                float2 param_7 = points[i_2];
-                float2 param_8 = points[spvSMod(i_2 + 1, 4)];
-                nearest = fast::min(nearest, segmentDistance(param_6, param_7, param_8));
+                float2 param_2 = p;
+                float2 param_3 = points[i_1];
+                float2 param_4 = points[spvSMod(i_1 + 1, 4)];
+                nearest = fast::min(nearest, segmentDistance(param_2, param_3, param_4));
             }
             float width = (pixel * 1.2999999523162841796875) * mix(1.0, 0.550000011920928955078125, age);
             float core = smoothstep(width * 2.0, width * 0.5, nearest);
             float glow = exp((-nearest) / (pixel * 9.0)) * 0.300000011920928955078125;
             float fade = (1.0 - age) * (1.0 - age);
-            float param_9 = ((_115.iTime * 0.04500000178813934326171875) - (float(_step) * 0.01600000075995922088623046875)) + (float(shape) * 0.5);
-            float3 hue = palette(param_9);
+            float param_5 = ((_105.iTime * 0.04500000178813934326171875) - (float(_step) * 0.01600000075995922088623046875)) + (float(shape) * 0.5);
+            float3 hue = palette(param_5);
             color += ((hue * (core + glow)) * fade);
         }
     }
@@ -843,12 +828,12 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     fragColor = float4(color, 1.0);
 }
 
-fragment main0_out main0(constant Globals& _115 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _105 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, _115);
+    mainImage(param, param_1, _105);
     out._fragColor = param;
     return out;
 }
