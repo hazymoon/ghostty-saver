@@ -145,7 +145,7 @@ for glsl in "$shader_dir"/*.glsl; do
     fi
 
     entry="$(python3 "$repo_root/Scripts/emit-shader-entry.py" \
-        "$identifier" "$stem" "$entry_point" "$work_dir/$stem.metal")"
+        "$identifier" "$stem" "$entry_point" "$work_dir/$stem.metal" "$glsl")"
     shader_entries="$shader_entries$entry
 "
     if [ -z "$identifiers" ]; then
@@ -167,8 +167,17 @@ fi
     echo "/// One shader's MSL plus the name of its fragment function."
     echo "public struct ShaderProgram {"
     echo "    public let name: String"
+    echo "    /// What the shader draws, taken from its leading comment."
+    echo "    public let summary: String"
     echo "    public let entryPoint: String"
     echo "    public let source: String"
+    echo ""
+    echo "    public init(name: String, summary: String, entryPoint: String, source: String) {"
+    echo "        self.name = name"
+    echo "        self.summary = summary"
+    echo "        self.entryPoint = entryPoint"
+    echo "        self.source = source"
+    echo "    }"
     echo "}"
     echo ""
     echo "$layout_swift"

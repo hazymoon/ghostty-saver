@@ -20,6 +20,7 @@ struct Options {
     var targetFPS: Double = 60
     var quiet: QuietLevel = .verbose
     var shaderName: String?
+    var listShaders = false
     var verify = false
     var dumpPath: String?
     var dumpTime: Double = 0
@@ -31,7 +32,9 @@ let availableShaders = GeneratedShaders.all.map(\.name).joined(separator: ", ")
 let usage = """
 usage: ghostty-saver [options]
 
-  --shader NAME     which shader to use (default: \(ShaderCatalog.defaultName)). available: \(availableShaders)
+  --shader NAME     which shader to use (default: \(ShaderCatalog.defaultName)),
+                    or \(ShaderCatalog.randomName) to pick one for you
+  --list-shaders    list the shaders and what they draw, then exit
   --size WxH        state the resolution instead of asking the terminal
   --seconds N       stop after N seconds (default: run until a key is pressed)
   --frames N        stop after N frames
@@ -64,6 +67,8 @@ func parseOptions() -> Options {
             exit(0)
         case "--shader":
             options.shaderName = nextValue(argument)
+        case "--list-shaders":
+            options.listShaders = true
         case "--size":
             let value = nextValue(argument)
             let parts = value.lowercased().split(separator: "x")
@@ -105,6 +110,16 @@ func fail(_ message: String) -> Never {
 
 func report(_ text: String) {
     FileHandle.standardError.write(Data((text + "\n").utf8))
+}
+
+/// Prints the catalog, padded to the widest name so the summaries line up.
+func listShaders() -> Never {
+    let width = GeneratedShaders.all.map(\.name.count).max() ?? 0
+    for program in GeneratedShaders.all {
+        let padding = String(repeating: " ", count: width - program.name.count)
+        print("\(program.name)\(padding)  \(program.summary)")
+    }
+    exit(0)
 }
 
 func selectShader(named name: String?) -> ShaderProgram {
@@ -189,6 +204,9 @@ func runVerify(program: ShaderProgram, width: Int, height: Int, dumpPath: String
 // MARK: - Startup
 
 let options = parseOptions()
+
+if options.listShaders { listShaders() }
+
 let program = selectShader(named: options.shaderName)
 
 if options.verify {
