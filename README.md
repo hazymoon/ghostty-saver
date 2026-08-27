@@ -42,6 +42,23 @@ protocol's APC sequence and renders it as a pane title, so the command never
 reaches Ghostty. `lock-command` talks to the client tty directly, which is why
 that is the supported path.
 
+### Releases
+
+Pushing a `v*` tag builds on an Apple Silicon runner and attaches
+`ghostty-saver-<tag>-macos-arm64.tar.gz` and a `SHA256SUMS` to the release.
+The archive holds `bin/ghostty-saver` and the license, so installing it is an
+unpack, and a package manager can pin the tarball by hash without needing a
+Swift toolchain on the machine it installs to.
+
+`.github/workflows/release.yml` also runs from the Actions tab without a tag:
+it builds, checks the signature, renders a frame and runs the tests, then
+stops before publishing.
+
+**Do not strip the binary.** arm64 macOS will not run an executable whose
+signature does not match its contents, and stripping invalidates the ad-hoc
+signature the linker writes. The workflow asks `codesign` on every release so
+a consumer can rely on that rather than assume it.
+
 ## Usage
 
 ```
