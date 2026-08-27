@@ -159,7 +159,7 @@ let transport = KittySharedMemoryTransport(
     quiet: quiet
 )
 let renderer = GradientRenderer(width: width, height: height)
-let reader = outputIsTTY ? ResponseReader(fd: TerminalSession.outputFD) : nil
+let reader = outputIsTTY ? ResponseReader(fd: TerminalSession.inputFD) : nil
 
 var shmCreateSamples = Samples()   // shm_open + ftruncate + mmap
 var fillSamples = Samples()        // gradient generation
@@ -247,10 +247,15 @@ let elapsed = monotonicNow() - loopStart
 // Restoring deletes the image and leaves the alternate screen, so hold before
 // that when the frame is meant to be looked at.
 if options.hold && outputIsTTY && !stoppedByUser {
-    var pfd = pollfd(fd: TerminalSession.outputFD, events: Int16(POLLIN), revents: 0)
-    _ = poll(&pfd, 1, -1)
+    // The reply descriptor is non-blocking, so a read can come back empty
+    // when the byte poll saw went elsewhere. That is not a keypress.
     var discard: UInt8 = 0
-    _ = read(TerminalSession.outputFD, &discard, 1)
+    while true {
+        var pfd = pollfd(fd: TerminalSession.inputFD, events: Int16(POLLIN), revents: 0)
+        if poll(&pfd, 1, -1) <= 0 || pfd.revents & Int16(POLLIN) == 0 { break }
+        if read(TerminalSession.inputFD, &discard, 1) > 0 { break }
+        if errno != EAGAIN && errno != EWOULDBLOCK { break }
+    }
 }
 
 TerminalSession.restore()

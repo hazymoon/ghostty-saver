@@ -35,6 +35,11 @@ public final class ResponseReader {
     /// the byte poll saw goes to another reader on the same tty.
     public init(fd: Int32) {
         self.fd = fd
+        // Never on a descriptor this process inherited: O_NONBLOCK belongs to
+        // the open file description, and the ones behind standard input,
+        // output and error are the shell's. A flag left on one of those
+        // outlives this process and fails the shell's next large write.
+        guard fd != STDIN_FILENO, fd != STDOUT_FILENO, fd != STDERR_FILENO else { return }
         let flags = fcntl(fd, F_GETFL)
         if flags >= 0 { _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK) }
     }
