@@ -187,6 +187,12 @@ window, that hyperspace flashes when it jumps, that the aurora is green where
 it is lit. Those are deliberately loose. They are there to catch a shader that
 has stopped drawing what its name says, not to pin down a look.
 
+`.github/workflows/ci.yml` runs the same suite on every pull request, on the
+Apple Silicon image the release is built on. It builds, renders one frame to
+prove Metal and shared memory work on the runner, and tests - and stops there.
+Signing and packaging belong to a release, which is `release.yml`, and that
+fires on a `v*` tag rather than on a branch.
+
 ## Checking for leaks
 
 Re-transmitting a whole frame every 16ms is exactly the workload that leaks if
