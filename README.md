@@ -183,6 +183,36 @@ own spacing gets too tight, and `starwars` stops the text at the same point.
 And anything counted out in pixels wants to be counted out in screen heights
 instead, so the look survives a retina display and a small window alike.
 
+### Staying inside the frame
+
+Full screen on a 4K display is 3832 x 2152 px, and the terminal wants about
+3 ms of the 16.7 ms a 60fps frame has. What is left for the shader is roughly
+13 ms, and it is the p95 that has to fit in it rather than the mean: a shader
+whose average is comfortable still drops frames if its slow ones are not.
+`docs/frame-times.md` has what each shader here measures.
+
+A fragment shader runs its whole body once per pixel, so anything in it that
+does not depend on the pixel is computed eight million times to arrive at one
+answer. `mystify` hashed eight corner constants and stepped a colour cycle
+inside its loops - 32 sines and 72 cosines per pixel, for values that were the
+same everywhere on the screen. That was a third of its frame. Constants belong
+in the source, and a value that advances by a fixed angle belongs in a
+recurrence: take the first cosine and turn it.
+
+What is left after that is the part that genuinely varies per pixel, and it is
+worth bounding cheaply before computing it exactly. A box around the shape only
+excludes pixels outside the box, which leaves the inside of anything large
+paying in full - `mystify` measured all four sides of twelve copies of a quad
+from pixels deep inside it. Distance is what bounds distance: a copy's outline
+cannot have moved further than its fastest corner did, so the distance found
+for one copy, less that, still bounds the next. Skipping on that bound halved
+the shader. And check what the fades actually multiply, because the last of
+those twelve copies was drawn at zero.
+
+To see where the time goes, run it in a Ghostty window with `--stats`. Read
+`frames` before the timings: a keypress ends the run, and a short one averages
+the shader's first compile into its numbers.
+
 To look at a shader without a terminal:
 
 ```sh
@@ -275,6 +305,9 @@ series, so the detector cannot quietly stop detecting.
 approach, along with the Ghostty implementation details the design depends on:
 why every frame needs a fresh shared memory name, why a placement id must be
 pinned, and how tmux behaves.
+
+`docs/frame-times.md` is what every shader measures on a 4K screen, and what
+holds them back.
 
 ## License
 
