@@ -1,0 +1,112 @@
+# Builds the release binary on an Apple Silicon runner and attaches it to the
+# GitHub release for the tag that triggered the run.
+#
+# Publishing a binary at all is for the sake of the consumer being a Nix
+# derivation: fetching a tarball against a pinned hash needs no Swift toolchain
+# on the machine doing the installing, and the install is then covered by the
+# same `nix flake check` that covers everything else. Building from source at
+# install time needs the Xcode command line tools on every machine and cannot
+# be checked that way.
+#
+# Nothing here compiles a shader. Generated/Shaders.swift is committed and the
+# MSL goes to Metal at runtime, so a release build needs neither glslang nor
+# spirv-cross.
+#
+# A workflow_dispatch run does everything except publish, so the pipeline can
+# be rehearsed before the first tag exists.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Pinned to a specific image rather than macos-latest so the toolchain does
+    # not move underneath a release without the version being bumped here.
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Record the toolchain
+        # Which Swift built a given binary is worth being able to look up later,
+        # and the run log is the only place it is written down.
+        run: |
+          swift --version
+          {
+            echo '```'
+            swift --version
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve the version
+        # The tag is the only place a version lives; Package.swift does not
+        # carry one. A dispatch run has no tag, so it names the artifact after
+        # the commit and stops before publishing.
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="v0.0.0-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$version" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: swift build -c release
+
+      - name: Check the binary carries a signature
+        # Whatever installs this must not strip it: arm64 macOS refuses to run
+        # an executable whose signature does not match the contents, and
+        # stripping invalidates the ad-hoc signature the linker writes. Asking
+        # codesign on every release keeps that requirement resting on something
+        # observed rather than assumed.
+        run: |
+          codesign --verify --verbose=2 .build/release/ghostty-saver
+          codesign --display --verbose=2 .build/release/ghostty-saver
+
+      - name: Render one frame
+        # The smallest check that Metal and POSIX shared memory both work on
+        # the runner, and it needs no terminal. Kept separate from the test
+        # suite: if this passes and `swift test` does not, the problem is in a
+        # test's own assumptions rather than in the environment.
+        run: .build/release/ghostty-saver --verify --size 64x64
+
+      - name: Test
+        run: swift test
+
+      - name: Package
+        run: |
+          staging="$(mktemp -d)"
+          mkdir -p "$staging/bin"
+          install -m 755 .build/release/ghostty-saver "$staging/bin/ghostty-saver"
+          install -m 644 LICENSE "$staging/LICENSE"
+
+          mkdir dist
+          # COPYFILE_DISABLE stops bsdtar from writing ._ AppleDouble members
+          # for extended attributes, which are noise in the archive and trip up
+          # extractors that are not macOS.
+          COPYFILE_DISABLE=1 tar -czf \
+            "dist/ghostty-saver-$version-macos-arm64.tar.gz" \
+            -C "$staging" bin LICENSE
+
+          cd dist
+          shasum -a 256 ./*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$version" \
+            --title "$version" \
+            --generate-notes \
+            "dist/ghostty-saver-$version-macos-arm64.tar.gz" \
+            dist/SHA256SUMS
