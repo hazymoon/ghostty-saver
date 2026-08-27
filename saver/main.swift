@@ -394,7 +394,7 @@ while !stopped {
             stopped = true
         case .timeout:
             TerminalSession.restore()
-            report("no reply from the terminal (frame \(frameIndex))")
+            report("no reply from the terminal (frame \(frameIndex)): \(reader.lastTimeoutReason)")
             exit(1)
         }
         if options.stats { ackSamples.append(monotonicNow() - ackStart) }
