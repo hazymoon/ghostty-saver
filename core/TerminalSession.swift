@@ -86,12 +86,19 @@ public enum TerminalSession {
     /// arrived yet would survive that, so the normal exit path drains first.
     /// Not for use from a signal handler.
     public static func discardPendingInput(for duration: TimeInterval = 0.05) {
+        // The deadline bounds the loop, not a read inside it: the same
+        // unreadable-but-polled state that drainBriefly guards against would
+        // park here for good, one line before the exit path reaches it.
+        let flags = fcntl(outputDescriptor, F_GETFL)
+        if flags >= 0 { _ = fcntl(outputDescriptor, F_SETFL, flags | O_NONBLOCK) }
+        defer { if flags >= 0 { _ = fcntl(outputDescriptor, F_SETFL, flags) } }
+
         var chunk = [UInt8](repeating: 0, count: 256)
         let deadline = monotonicNow() + duration
         while monotonicNow() < deadline {
             var pfd = pollfd(fd: outputDescriptor, events: Int16(POLLIN), revents: 0)
             let remainingMs = Int32(max(0, (deadline - monotonicNow()) * 1000))
-            if poll(&pfd, 1, remainingMs) <= 0 { break }
+            if poll(&pfd, 1, remainingMs) <= 0 || pfd.revents & Int16(POLLIN) == 0 { break }
             let n = chunk.withUnsafeMutableBytes { read(outputDescriptor, $0.baseAddress, $0.count) }
             if n <= 0 { break }
         }
@@ -133,7 +140,7 @@ public enum TerminalSession {
         // otherwise it turns up on the shell prompt as stray text.
         // poll and read are both async-signal-safe, so this is reachable from
         // the signal handler.
-        drainBriefly()
+        drainBriefly(fd: outputDescriptor)
 
         if termiosSaved {
             // TCSAFLUSH rather than TCSANOW: the reply to the last frame is
@@ -147,18 +154,33 @@ public enum TerminalSession {
     /// Reads and discards for a bounded number of short polls. Deliberately
     /// counts iterations rather than consulting a clock, to keep the work
     /// inside a signal handler to calls that are safe there.
-    private static func drainBriefly() {
+    ///
+    /// Nothing here may block. The terminal is still in raw mode with VMIN 1,
+    /// where a read with nothing behind it waits indefinitely, and this runs
+    /// after the render loop has finished - a read that parks stops the
+    /// screensaver with its last frame up, no message, and no way out but a
+    /// keypress. poll answering at all is not the same as poll answering
+    /// "readable": POLLERR and POLLNVAL arrive as a positive return too, and a
+    /// byte can go somewhere else between the poll and the read. So the events
+    /// are checked, and the descriptor is non-blocking for the duration in
+    /// case something gets past that. fcntl is safe to call from the signal
+    /// handler this can run in.
+    static func drainBriefly(fd: Int32) {
+        let flags = fcntl(fd, F_GETFL)
+        if flags >= 0 { _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK) }
+        defer { if flags >= 0 { _ = fcntl(fd, F_SETFL, flags) } }
+
         var chunk = [UInt8](repeating: 0, count: 256)
         var idlePolls = 0
         for _ in 0..<20 {
-            var pfd = pollfd(fd: outputDescriptor, events: Int16(POLLIN), revents: 0)
-            if poll(&pfd, 1, 10) <= 0 {
+            var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            if poll(&pfd, 1, 10) <= 0 || pfd.revents & Int16(POLLIN) == 0 {
                 idlePolls += 1
                 if idlePolls >= 2 { return }
                 continue
             }
             idlePolls = 0
-            let n = chunk.withUnsafeMutableBytes { read(outputDescriptor, $0.baseAddress, $0.count) }
+            let n = chunk.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
             if n <= 0 { return }
         }
     }
