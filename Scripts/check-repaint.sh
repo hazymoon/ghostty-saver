@@ -101,13 +101,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Permission first, on the window this runs in, before a window is opened
-# that would be left behind by a failure here.
-if ! screencapture -x -l "$("$probe" window "$(pgrep -n -x ghostty || echo 0)" 2> /dev/null | sed -n 's/^id=\([0-9]*\).*/\1/p')" "$work/permission.png" 2> /dev/null \
-    || [ ! -s "$work/permission.png" ]; then
-    echo "screencapture cannot read a window. Grant Screen Recording permission to" >&2
-    echo "the terminal this runs from: System Settings > Privacy & Security >" >&2
-    echo "Screen Recording. A newly granted permission needs the terminal restarted." >&2
+# Permission first, on a window of the terminal this runs in, before a
+# window is opened that would be left behind by a failure here. Any window
+# of that process will do; the strips the height of a title bar are skipped
+# because they may be nothing to capture even with permission.
+own_pid="$(pgrep -n -x ghostty || echo 0)"
+permission=0
+while read -r line; do
+    id="$(sed -n 's/^id=\([0-9]*\).*/\1/p' <<< "$line")"
+    height="$(sed -n 's/.* h=\([0-9]*\).*/\1/p' <<< "$line")"
+    [ -n "$id" ] && [ "${height:-0}" -ge 200 ] || continue
+    if screencapture -x -l "$id" "$work/permission.png" 2> /dev/null && [ -s "$work/permission.png" ]; then
+        permission=1
+        break
+    fi
+done <<< "$("$probe" window "$own_pid" 2> /dev/null || true)"
+if [ "$permission" -eq 0 ]; then
+    echo "screencapture cannot read a window of Ghostty (pid $own_pid). Grant Screen" >&2
+    echo "Recording permission to Ghostty - or to tmux, when run from a tmux pane -" >&2
+    echo "in System Settings > Privacy & Security > Screen Recording, then restart it." >&2
     exit 1
 fi
 
