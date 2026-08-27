@@ -1,0 +1,70 @@
+# Builds and tests every pull request.
+#
+# Separate from release.yml on purpose. That workflow is the release: it fires
+# on a v* tag, builds in release configuration, checks the signature and
+# publishes a tarball. None of that belongs on a pull request, and running it
+# there means either dispatching it by hand on every push or firing the whole
+# release pipeline for a branch that is not being released.
+#
+# So this is the smaller half: the two things a reviewer wants to know before
+# reading a diff, which are that it builds and that the tests pass.
+#
+# Debug rather than release, because `swift test` builds debug anyway and the
+# two configurations would otherwise be compiled from scratch one after the
+# other. What the optimiser does to a release build is release.yml's business.
+#
+# Nothing here compiles a shader. Generated/Shaders.swift is committed and the
+# MSL goes to Metal at runtime, so this needs neither glslang nor spirv-cross.
+
+name: ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A pull request pushed three times in a minute should not hold three macOS
+# runners. Only the newest push is worth an answer.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # The same image release.yml pins. A green tick here is only worth
+    # something if it was earned on the toolchain that will build the release.
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Record the toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Render one frame
+        # The smallest check that Metal and POSIX shared memory both work on
+        # the runner, and it needs no terminal. Kept separate from the test
+        # suite: if this passes and `swift test` does not, the problem is in a
+        # test's own assumptions rather than in the environment.
+        run: .build/debug/ghostty-saver --verify --size 64x64
+
+      - name: Render a sequence
+        # The frame sequence Scripts/record-demo.sh is built on. `swift test`
+        # cannot reach it - it lives in the executable rather than in SaverCore
+        # - so this is where it gets checked, and what it checks is that the
+        # frames advance through iTime, not merely that three files appeared.
+        run: |
+          out="$RUNNER_TEMP/sequence"
+          .build/debug/ghostty-saver --shader matrix --size 96x64 \
+            --dump "$out" --at 1.0 --frames 3 --fps 10
+          test "$(ls "$out"/*.png | wc -l)" -eq 3
+          test "$(shasum -a 256 "$out"/*.png | awk '{print $1}' | sort -u | wc -l)" -eq 3
+
+      - name: Test
+        run: swift test

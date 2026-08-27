@@ -64,15 +64,18 @@ a consumer can rely on that rather than assume it.
 ```
 ghostty-saver [options]
 
-  --shader NAME     which shader to use (default: matrix)
+  --shader NAME     which shader to use (default: matrix), or random
+  --list-shaders    list the shaders and what they draw, then exit
   --size WxH        state the resolution instead of asking the terminal
   --seconds N       stop after N seconds (default: run until a key is pressed)
-  --frames N        stop after N frames
+  --frames N        stop after N frames; with --dump, how many to write
   --fps N           target frame rate (default 60, 0 for uncapped)
   --quiet-level N   0=replies on (default), 1=errors only, 2=no replies
   --verify          render one frame without a terminal and check shared memory
-  --dump PATH       with --verify, also write the frame to PATH as a PNG
-  --at SECONDS      with --dump, the iTime to render at (default 0)
+  --dump PATH       with --verify, also write the frame to PATH as a PNG.
+                    with --frames, PATH is a directory and the frames are
+                    written to it as a numbered sequence, 1/--fps apart
+  --at SECONDS      with --dump, the iTime of the first frame (default 0)
   --stats           print a per-frame breakdown on exit
 ```
 
@@ -80,16 +83,69 @@ Any keypress exits. The terminal is restored on exit, on SIGINT, SIGTERM and
 SIGHUP: images are deleted, the cursor comes back, the alternate screen is left
 and termios is put back the way it was.
 
+## Shaders
+
+| name         | what it draws                                                     |
+| ------------ | ----------------------------------------------------------------- |
+| `matrix`     | Digital rain. The default.                                        |
+| `starwars`   | An opening crawl, receding to a vanishing point over a starfield. |
+| `hyperspace` | Stars stretching into streaks, a white-out, and back to a cruise. |
+| `mystify`    | Windows' Mystify: bouncing polygons trailing coloured ribbons.    |
+| `tunnel`     | The demoscene tunnel, flown down with the camera swaying.         |
+| `synthwave`  | A banded sun on the horizon over a neon grid running away.        |
+| `toasters`   | After Dark's flying toasters, with the toast.                     |
+| `aurora`     | Northern lights over a black ridge line.                          |
+| `gradient`   | Not a screensaver: the fixture that proves the conversion works.  |
+
+`--list-shaders` prints the same list, taken from the shaders themselves.
+
+`--shader random` picks one for you at each lock, which is the point of having
+more than one. It never picks `gradient`.
+
+```tmux
+set -g lock-command '~/.local/bin/ghostty-saver --shader random'
+```
+
+### Recording the demo
+
+```sh
+brew install ffmpeg gifsicle
+swift build -c release
+Scripts/record-demo.sh
+```
+
+That renders two seconds of each shader and writes `demo.gif`. The frames come
+out of the screensaver's own binary, through Metal, by way of `--dump` with
+`--frames` - rendering the shaders a second time somewhere else would produce a
+picture of something that is not quite what ships.
+
+Each clip gets its own palette. Eight shaders share nothing: a matrix green, a
+sunset, an aurora. One colour table across the lot bands every gradient in the
+set, and a GIF is allowed a palette per frame, so there is no reason to make
+them share one.
+
+The GIF is not committed. It is a couple of megabytes that would change every
+time a shader is touched, so it goes on a release or an issue and this file
+points at the URL.
+
+`--width`, `--fps`, `--seconds`, `--colors` and `--lossy` trade size against
+smoothness; `--keep` leaves the PNG frames behind to look at.
+
 ## Writing a shader
 
-Drop a Shadertoy-style file into `shaders/` containing only `mainImage`:
+Drop a Shadertoy-style file into `shaders/` containing only `mainImage`, with a
+comment at the top saying what it draws:
 
 ```glsl
+// A wash of colour that goes nowhere.
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
     fragColor = vec4(uv, 0.5 + 0.5 * sin(iTime), 1.0);
 }
 ```
+
+That leading comment is what `--list-shaders` shows: it is read up to the first
+blank `//`, so the notes below the summary stay out of it.
 
 Then regenerate:
 
@@ -115,7 +171,47 @@ Set `GHOSTTY_SAVER_PREFIX_FILE` to a local copy to work offline, or
 Shaders must be stateless. Ghostty's custom-shader has no frame-to-frame
 storage, so everything is derived from `iTime` and a hash. `shaders/matrix.glsl`
 is written that way: trail positions, glyphs and depth all come out of the
-clock.
+clock. So does everything else here - a corner bouncing off the edges in
+`mystify` is a triangle wave, a toaster's place in the flock in `toasters` is a
+hash of which tile it is in, and the crawl in `starwars` inverts the projection
+to turn a pixel into a line and a column. Nothing is integrated forward.
+
+Two things follow from being on a screen rather than on Shadertoy. Anything
+drawn far away needs to fade out before one pixel covers more than it can
+resolve, or it shimmers - `synthwave` fades each family of grid lines when its
+own spacing gets too tight, and `starwars` stops the text at the same point.
+And anything counted out in pixels wants to be counted out in screen heights
+instead, so the look survives a retina display and a small window alike.
+
+### Staying inside the frame
+
+Full screen on a 4K display is 3832 x 2152 px, and the terminal wants about
+3 ms of the 16.7 ms a 60fps frame has. What is left for the shader is roughly
+13 ms, and it is the p95 that has to fit in it rather than the mean: a shader
+whose average is comfortable still drops frames if its slow ones are not.
+`docs/frame-times.md` has what each shader here measures.
+
+A fragment shader runs its whole body once per pixel, so anything in it that
+does not depend on the pixel is computed eight million times to arrive at one
+answer. `mystify` hashed eight corner constants and stepped a colour cycle
+inside its loops - 32 sines and 72 cosines per pixel, for values that were the
+same everywhere on the screen. That was a third of its frame. Constants belong
+in the source, and a value that advances by a fixed angle belongs in a
+recurrence: take the first cosine and turn it.
+
+What is left after that is the part that genuinely varies per pixel, and it is
+worth bounding cheaply before computing it exactly. A box around the shape only
+excludes pixels outside the box, which leaves the inside of anything large
+paying in full - `mystify` measured all four sides of twelve copies of a quad
+from pixels deep inside it. Distance is what bounds distance: a copy's outline
+cannot have moved further than its fastest corner did, so the distance found
+for one copy, less that, still bounds the next. Skipping on that bound halved
+the shader. And check what the fades actually multiply, because the last of
+those twelve copies was drawn at zero.
+
+To see where the time goes, run it in a Ghostty window with `--stats`. Read
+`frames` before the timings: a keypress ends the run, and a short one averages
+the shader's first compile into its numbers.
 
 To look at a shader without a terminal:
 
@@ -123,6 +219,10 @@ To look at a shader without a terminal:
 swift build -c release
 .build/release/ghostty-saver --shader matrix --dump /tmp/frame.png --at 7.5 --size 1600x900
 ```
+
+`--at` matters for anything on a long cycle: `hyperspace` only jumps near the
+end of its 22 seconds, and `starwars` takes a couple of minutes to run the
+crawl through.
 
 ## Tests
 
@@ -133,8 +233,22 @@ swift test
 The suite covers the exact bytes of the graphics protocol escape sequence, APC
 reply framing, the shared memory lifecycle, linear texture alignment, a real
 GPU render read back through the shared memory mapping, the generated uniform
-offsets, resize handling, and what each shader has to look like. None of it
-needs a terminal.
+offsets, resize handling, shader selection, and what each shader has to look
+like. None of it needs a terminal.
+
+Every shader is checked for the things that hold whatever it draws - it
+compiles, the same `iTime` gives the same frame, a different one does not, and
+it draws something at more than one resolution - and then once more for the
+thing that makes it itself: that the crawl is yellow and stays inside a narrow
+window, that hyperspace flashes when it jumps, that the aurora is green where
+it is lit. Those are deliberately loose. They are there to catch a shader that
+has stopped drawing what its name says, not to pin down a look.
+
+`.github/workflows/ci.yml` runs the same suite on every pull request, on the
+Apple Silicon image the release is built on. It builds, renders one frame to
+prove Metal and shared memory work on the runner, and tests - and stops there.
+Signing and packaging belong to a release, which is `release.yml`, and that
+fires on a `v*` tag rather than on a branch.
 
 ## Checking for leaks
 
@@ -191,6 +305,9 @@ series, so the detector cannot quietly stop detecting.
 approach, along with the Ghostty implementation details the design depends on:
 why every frame needs a fresh shared memory name, why a placement id must be
 pinned, and how tmux behaves.
+
+`docs/frame-times.md` is what every shader measures on a 4K screen, and the
+conditions a measurement has to meet to mean anything.
 
 ## License
 

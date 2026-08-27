@@ -18,6 +18,10 @@ public final class ResponseReader {
     private var chunk = [UInt8](repeating: 0, count: 256)
     private var pending: [UInt8] = []
 
+    /// Why the last call gave up. "no reply from the terminal" on its own says
+    /// nothing about whether the terminal went quiet or the descriptor did.
+    public private(set) var lastTimeoutReason = "nothing arrived"
+
     private enum State {
         case idle
         case sawEscape
@@ -25,8 +29,19 @@ public final class ResponseReader {
         case inAPCSawEscape
     }
 
+    /// The descriptor is made non-blocking here rather than assumed to be.
+    /// Everything below is written around a read that can come back empty, and
+    /// in raw mode with VMIN 1 a blocking one does not come back at all when
+    /// the byte poll saw goes to another reader on the same tty.
     public init(fd: Int32) {
         self.fd = fd
+        // Never on a descriptor this process inherited: O_NONBLOCK belongs to
+        // the open file description, and the ones behind standard input,
+        // output and error are the shell's. A flag left on one of those
+        // outlives this process and fails the shell's next large write.
+        guard fd != STDIN_FILENO, fd != STDOUT_FILENO, fd != STDERR_FILENO else { return }
+        let flags = fcntl(fd, F_GETFL)
+        if flags >= 0 { _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK) }
     }
 
     /// Waits until one complete APC reply arrives, a non-APC byte shows up, or
@@ -42,19 +57,37 @@ public final class ResponseReader {
             }
 
             let remainingMs = Int32((deadline - monotonicNow()) * 1000)
-            if remainingMs <= 0 { return .timeout }
+            if remainingMs <= 0 {
+                lastTimeoutReason = "deadline passed"
+                return .timeout
+            }
 
             var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             let ready = poll(&pfd, 1, remainingMs)
-            if ready == 0 { return .timeout }
+            if ready == 0 {
+                lastTimeoutReason = "poll saw nothing in \(remainingMs) ms"
+                return .timeout
+            }
             if ready < 0 {
                 if errno == EINTR { continue }
+                lastTimeoutReason = "poll failed: errno \(errno)"
+                return .timeout
+            }
+            // A poll that answered is not a poll that said "readable": POLLERR
+            // and POLLNVAL come back positive too.
+            if pfd.revents & Int16(POLLIN) == 0 {
+                lastTimeoutReason = "poll answered with revents \(pfd.revents), not readable"
                 return .timeout
             }
 
             let n = chunk.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
             if n <= 0 {
                 if n < 0 && errno == EINTR { continue }
+                // The descriptor is non-blocking, so the byte poll saw can be
+                // gone by the time it is read - another reader on the same tty
+                // takes it. That is not the end of the wait; the deadline is.
+                if n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) { continue }
+                lastTimeoutReason = n == 0 ? "the descriptor reached end of file" : "read failed: errno \(errno)"
                 return .timeout
             }
             pending.append(contentsOf: chunk[0..<n])

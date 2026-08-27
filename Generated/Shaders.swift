@@ -4,8 +4,17 @@
 /// One shader's MSL plus the name of its fragment function.
 public struct ShaderProgram {
     public let name: String
+    /// What the shader draws, taken from its leading comment.
+    public let summary: String
     public let entryPoint: String
     public let source: String
+
+    public init(name: String, summary: String, entryPoint: String, source: String) {
+        self.name = name
+        self.summary = summary
+        self.entryPoint = entryPoint
+        self.source = source
+    }
 }
 
 /// Byte offsets into Ghostty's shadertoy uniform block (Globals).
@@ -98,9 +107,157 @@ public enum ShadertoyUniformLayout {
 
 /// MSL generated from shaders/*.glsl.
 public enum GeneratedShaders {
+    /// Generated from shaders/aurora.glsl
+    public static let aurora = ShaderProgram(
+        name: "aurora",
+        summary: "Northern lights: curtains of green drifting over a star field, with a black ridge line along the bottom to stand them against.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float hash11(thread const float& n)
+{
+    return fract(sin(n) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float3 starfield(thread const float2& fragCoord, constant Globals& _75)
+{
+    float cellSize = _75.iResolution[1u] / 44.0;
+    float2 grid = fragCoord / float2(cellSize);
+    float2 cell = floor(grid);
+    float2 param = cell;
+    float seed = hash21(param);
+    if (seed > 0.2199999988079071044921875)
+    {
+        return float3(0.0);
+    }
+    float param_1 = seed * 13.69999980926513671875;
+    float param_2 = seed * 29.299999237060546875;
+    float2 at = float2(hash11(param_1), hash11(param_2));
+    float away = length((fract(grid) - at) * cellSize);
+    float param_3 = seed * 3.2999999523162841796875;
+    float twinkle = 0.75 + (0.25 * sin((_75.iTime * (0.5 + (1.60000002384185791015625 * hash11(param_3)))) + (seed * 90.0)));
+    float param_4 = seed * 7.099999904632568359375;
+    return ((float3(0.819999992847442626953125, 0.87999999523162841796875, 1.0) * exp(((-away) * away) / 0.4000000059604644775390625)) * (0.25 + (0.75 * hash11(param_4)))) * twinkle;
+}
+
+static inline __attribute__((always_inline))
+float fold(thread const float& x, thread const float& seed, thread const float& rate, constant Globals& _75)
+{
+    return ((sin(((x * 1.2999999523162841796875) + ((_75.iTime * 0.20999999344348907470703125) * rate)) + seed) * 0.100000001490116119384765625) + (sin(((x * 2.7000000476837158203125) - ((_75.iTime * 0.17000000178813934326171875) * rate)) + (seed * 2.2999999523162841796875)) * 0.048000000417232513427734375)) + (sin(((x * 5.099999904632568359375) + ((_75.iTime * 0.12999999523162841796875) * rate)) + (seed * 3.7000000476837158203125)) * 0.02099999971687793731689453125);
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _75)
+{
+    float2 uv = (fragCoord - (float2(_75.iResolution[0], _75.iResolution[1]) * 0.5)) / float2(_75.iResolution[1u]);
+    uv.y = -uv.y;
+    float3 color = mix(float3(0.02999999932944774627685546875, 0.054999999701976776123046875, 0.0949999988079071044921875), float3(0.00999999977648258209228515625, 0.01400000043213367462158203125, 0.04500000178813934326171875), float3(smoothstep(-0.5, 0.5, uv.y)));
+    float2 param = fragCoord;
+    color += starfield(param, _75);
+    for (int i = 0; i < 5; i++)
+    {
+        float seed = (float(i) * 13.69999980926513671875) + 1.89999997615814208984375;
+        float param_1 = seed * 1.7000000476837158203125;
+        float rate = 0.699999988079071044921875 + (0.5 * hash11(param_1));
+        float param_2 = uv.x;
+        float param_3 = seed;
+        float param_4 = rate;
+        float foot = ((-0.1599999964237213134765625) + (float(i) * 0.054999999701976776123046875)) + fold(param_2, param_3, param_4, _75);
+        float above = uv.y - foot;
+        float param_5 = seed * 5.30000019073486328125;
+        float height = 0.300000011920928955078125 + (0.2199999988079071044921875 * hash11(param_5));
+        float body = smoothstep(-0.0199999995529651641845703125, 0.01200000010430812835693359375, above) * exp((-fast::max(above, 0.0)) / (height * 0.4199999868869781494140625));
+        if (body <= 0.00200000009499490261077880859375)
+        {
+            continue;
+        }
+        float span = (0.5 + (0.5 * sin(((uv.x * 0.75) + (_75.iTime * 0.0500000007450580596923828125)) + (seed * 2.0)))) * (0.4000000059604644775390625 + (0.60000002384185791015625 * (0.5 + (0.5 * sin(((uv.x * 1.89999997615814208984375) - (_75.iTime * 0.0900000035762786865234375)) + (seed * 4.0))))));
+        span = smoothstep(0.0599999986588954925537109375, 0.62000000476837158203125, span);
+        if (span <= 0.0)
+        {
+            continue;
+        }
+        float param_6 = uv.x;
+        float param_7 = seed * 1.2999999523162841796875;
+        float param_8 = rate;
+        float lean = uv.x + (fold(param_6, param_7, param_8, _75) * 1.60000002384185791015625);
+        float rays = 0.5 + (0.5 * sin((lean * 78.0) + (seed * 40.0)));
+        rays = mix(rays, 0.5 + (0.5 * sin((((lean * 78.0) * 0.37000000476837158203125) - (_75.iTime * 0.4000000059604644775390625)) + seed)), 0.5);
+        rays = mix(rays, 0.75, smoothstep(0.0, height * 0.699999988079071044921875, fast::max(above, 0.0)));
+        float3 tint = mix(float3(0.1599999964237213134765625, 1.0, 0.519999980926513671875), float3(0.4199999868869781494140625, 0.300000011920928955078125, 0.949999988079071044921875), float3(fast::clamp(above / (height * 0.550000011920928955078125), 0.0, 1.0)));
+        color += ((((tint * body) * span) * mix(0.449999988079071044921875, 1.0, rays)) * 0.5);
+    }
+    float ridge = (((-0.3400000035762786865234375) + (0.04500000178813934326171875 * sin((uv.x * 2.099999904632568359375) + 0.699999988079071044921875))) + (0.0280000008642673492431640625 * sin((uv.x * 4.69999980926513671875) - 1.2999999523162841796875))) + (0.01400000043213367462158203125 * sin((uv.x * 9.30000019073486328125) + 2.900000095367431640625));
+    float land = smoothstep(0.0040000001899898052215576171875, -0.0040000001899898052215576171875, uv.y - ridge);
+    color = mix(color, color * 0.0599999986588954925537109375, float3(land));
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _75 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _75);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
     /// Generated from shaders/gradient.glsl
     public static let gradient = ShaderProgram(
         name: "gradient",
+        summary: "Conversion smoke test: Shadertoy form, mainImage only.",
         entryPoint: "main0",
         source: #"""
 #pragma clang diagnostic ignored "-Wmissing-prototypes"
@@ -165,9 +322,163 @@ fragment main0_out main0(constant Globals& _38 [[buffer(1)]], float4 gl_FragCoor
 }
 """#
     )
+    /// Generated from shaders/hyperspace.glsl
+    public static let hyperspace = ShaderProgram(
+        name: "hyperspace",
+        summary: "Jump to lightspeed: stars drift, then stretch into streaks, then the whole field whites out and drops back to a cruise.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+// Implementation of the GLSL mod() function, which is slightly different than Metal fmod()
+template<typename Tx, typename Ty>
+inline Tx mod(Tx x, Ty y)
+{
+    return x - y * floor(x / y);
+}
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float travelled(thread const float& u)
+{
+    float wind = fast::max(u - 13.0, 0.0);
+    return (0.1599999964237213134765625 * u) + ((0.100000001490116119384765625 * wind) * wind);
+}
+
+static inline __attribute__((always_inline))
+float speed(thread const float& u)
+{
+    return 0.1599999964237213134765625 + (0.20000000298023223876953125 * fast::max(u - 13.0, 0.0));
+}
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float hash11(thread const float& n)
+{
+    return fract(sin(n) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _96)
+{
+    float2 p = (fragCoord - (float2(_96.iResolution[0], _96.iResolution[1]) * 0.5)) / float2(_96.iResolution[1u]);
+    float radius = length(p);
+    float pixel = 1.0 / _96.iResolution[1u];
+    float u = mod(_96.iTime, 22.0);
+    float param = u;
+    float travel = travelled(param);
+    float param_1 = u;
+    float rate = speed(param_1);
+    float streak = (4.19999980926513671875 * rate) * 0.0384615398943424224853515625;
+    float turns = (precise::atan2(p.y, p.x) * 0.15915493667125701904296875) + 0.5;
+    float3 color = float3(0.0);
+    for (int layer = 0; layer < 5; layer++)
+    {
+        float depth = float(layer);
+        float around = (turns * 55.0) + (depth * 0.3170000016689300537109375);
+        float cell = mod(floor(around), 55.0);
+        float2 param_2 = float2(cell, depth);
+        float seed = hash21(param_2);
+        float param_3 = seed * 31.700000762939453125;
+        float offset = fract(around) - hash11(param_3);
+        float sideways = ((abs(offset) / 55.0) * 6.28318023681640625) * radius;
+        float along = fract(((seed * 13.0) + travel) + (depth * 0.611000001430511474609375));
+        float head = 1.5 * exp(4.19999980926513671875 * (along - 1.0));
+        float behind = head - radius;
+        float reach = streak * head;
+        bool _228 = behind < (-pixel);
+        bool _237;
+        if (!_228)
+        {
+            _237 = behind > (reach + pixel);
+        }
+        else
+        {
+            _237 = _228;
+        }
+        if (_237)
+        {
+            continue;
+        }
+        float tail = 1.0 - smoothstep(0.0, fast::max(reach, pixel * 0.699999988079071044921875), fast::max(behind, 0.0));
+        float width = pixel * (0.949999988079071044921875 + (1.7000000476837158203125 * head));
+        float across = exp((-(sideways * sideways)) / (width * width));
+        float born = smoothstep(0.0, 0.1599999964237213134765625, along);
+        float dying = 1.0 - smoothstep(0.824999988079071044921875, 1.5, head);
+        float param_4 = seed * 7.110000133514404296875;
+        float brightness = ((0.449999988079071044921875 + (0.75 * hash11(param_4))) * born) * dying;
+        float param_5 = seed * 3.13000011444091796875;
+        float3 tint = mix(float3(0.62000000476837158203125, 0.7799999713897705078125, 1.0), float3(1.0, 0.920000016689300537109375, 0.7799999713897705078125), float3(hash11(param_5)));
+        color += (((tint * across) * tail) * brightness);
+    }
+    float winding = smoothstep(13.0, 22.0, u);
+    color += (((float3(0.100000001490116119384765625, 0.23999999463558197021484375, 0.64999997615814208984375) * winding) * winding) * (0.2199999988079071044921875 + (0.4199999868869781494140625 * smoothstep(1.2999999523162841796875, 0.0, radius))));
+    float toJump = fast::min(u, 22.0 - u);
+    float flash = smoothstep(0.89999997615814208984375, 0.0, toJump);
+    color = mix(color, float3(0.819999992847442626953125, 0.89999997615814208984375, 1.0), float3((flash * flash) * 0.819999992847442626953125));
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _96 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _96);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
     /// Generated from shaders/matrix.glsl
     public static let matrix = ShaderProgram(
         name: "matrix",
+        summary: "Matrix-style digital rain.",
         entryPoint: "main0",
         source: #"""
 #pragma clang diagnostic ignored "-Wmissing-prototypes"
@@ -356,6 +667,1010 @@ fragment main0_out main0(constant Globals& _199 [[buffer(1)]], float4 gl_FragCoo
 }
 """#
     )
+    /// Generated from shaders/mystify.glsl
+    public static let mystify = ShaderProgram(
+        name: "mystify",
+        summary: "Windows \"Mystify Your Mind\": polygons whose corners bounce around the screen, each redrawn a dozen times at earlier moments so the shape trails a ribbon.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+constant spvUnsafeArray<float4, 8> _169 = spvUnsafeArray<float4, 8>({ float4(0.07386718690395355224609375, 0.12730468809604644775390625, 19.033203125, 18.828125), float4(0.1533203125, 0.14277343451976776123046875, 17.5, 13.369140625), float4(0.077031247317790985107421875, 0.1392578184604644775390625, 3.59375, 10.15625), float4(0.1262499988079071044921875, 0.084589846432209014892578125, 15.546875, 0.859375), float4(0.110561527311801910400390625, 0.1494531333446502685546875, 0.390625, 19.4921875), float4(0.087578125298023223876953125, 0.123964846134185791015625, 10.546875, 12.265625), float4(0.106562502682209014892578125, 0.12871094048023223876953125, 1.2109375, 1.69921875), float4(0.086874999105930328369140625, 0.14330078661441802978515625, 18.173828125, 2.890625) });
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float bounce(thread const float& x)
+{
+    return abs((fract(x * 0.5) * 2.0) - 1.0);
+}
+
+static inline __attribute__((always_inline))
+float segmentDistanceSquared(thread const float2& p, thread const float2& a, thread const float2& b)
+{
+    float2 pa = p - a;
+    float2 ba = b - a;
+    float h = fast::clamp(dot(pa, ba) / fast::max(dot(ba, ba), 9.9999999392252902907785028219223e-09), 0.0, 1.0);
+    float2 offset = pa - (ba * h);
+    return dot(offset, offset);
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _90)
+{
+    float aspect = _90.iResolution[0u] / _90.iResolution[1u];
+    float2 p = fragCoord / float2(_90.iResolution[1u]);
+    float pixel = 1.0 / _90.iResolution[1u];
+    float3 color = float3(0.0);
+    float2 fastest = float2(0.0);
+    for (int i = 0; i < 8; i++)
+    {
+        fastest = fast::max(fastest, _169[i].xy);
+    }
+    float outlineMove = 0.100000001490116119384765625 * length(fastest * float2(aspect - 0.07999999821186065673828125, 0.920000016689300537109375));
+    float reach = pixel * 80.0;
+    float stepCos = 0.9949510097503662109375;
+    float stepSin = 0.10036163032054901123046875;
+    spvUnsafeArray<float2, 4> points;
+    int _395;
+    for (int shape = 0; shape < 2; shape++)
+    {
+        float3 angle = (float3((_90.iTime * 0.04500000178813934326171875) + (float(shape) * 0.5)) + float3(0.0, 0.3300000131130218505859375, 0.670000016689300537109375)) * 6.28318023681640625;
+        float3 hueCos = cos(angle);
+        float3 hueSin = sin(angle);
+        float carried = 0.0;
+        for (int _step = 0; _step < 11; _step++)
+        {
+            float3 hue = float3(0.5) + (hueCos * 0.5);
+            float3 turned = (hueCos * stepCos) + (hueSin * stepSin);
+            hueSin = (hueSin * stepCos) - (hueCos * stepSin);
+            hueCos = turned;
+            if (_step > 0)
+            {
+                carried -= outlineMove;
+                if (carried > reach)
+                {
+                    continue;
+                }
+            }
+            float age = float(_step) / 11.0;
+            float t = _90.iTime - (float(_step) * 0.100000001490116119384765625);
+            for (int i_1 = 0; i_1 < 4; i_1++)
+            {
+                float4 m = _169[(shape * 4) + i_1];
+                float param = (t * m.x) + m.z;
+                float param_1 = (t * m.y) + m.w;
+                points[i_1] = float2(mix(0.039999999105930328369140625, aspect - 0.039999999105930328369140625, bounce(param)), mix(0.039999999105930328369140625, 0.959999978542327880859375, bounce(param_1)));
+            }
+            float2 lo = fast::min(fast::min(points[0], points[1]), fast::min(points[2], points[3]));
+            float2 hi = fast::max(fast::max(points[0], points[1]), fast::max(points[2], points[3]));
+            float2 outside = fast::max(fast::max(lo - p, p - hi), float2(0.0));
+            float boxAway = length(outside);
+            if (boxAway > reach)
+            {
+                carried = boxAway;
+                continue;
+            }
+            float nearestSquared = 1000000000.0;
+            for (int i_2 = 0; i_2 < 4; i_2++)
+            {
+                if ((i_2 + 1) == 4)
+                {
+                    _395 = 0;
+                }
+                else
+                {
+                    _395 = i_2 + 1;
+                }
+                int next = _395;
+                float2 param_2 = p;
+                float2 param_3 = points[i_2];
+                float2 param_4 = points[next];
+                nearestSquared = fast::min(nearestSquared, segmentDistanceSquared(param_2, param_3, param_4));
+            }
+            float nearest = sqrt(nearestSquared);
+            carried = nearest;
+            float width = (pixel * 1.2999999523162841796875) * mix(1.0, 0.550000011920928955078125, age);
+            float core = smoothstep(width * 2.0, width * 0.5, nearest);
+            float glow = exp((-nearest) / (pixel * 9.0)) * 0.300000011920928955078125;
+            float fade = (1.0 - age) * (1.0 - age);
+            color += ((hue * (core + glow)) * fade);
+        }
+    }
+    color += float3(0.0199999995529651641845703125, 0.0199999995529651641845703125, 0.0500000007450580596923828125);
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _90 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _90);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/starwars.glsl
+    public static let starwars = ShaderProgram(
+        name: "starwars",
+        summary: "The opening crawl: yellow text receding towards a vanishing point over a field of stars.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+// Implementation of the GLSL mod() function, which is slightly different than Metal fmod()
+template<typename Tx, typename Ty>
+inline Tx mod(Tx x, Ty y)
+{
+    return x - y * floor(x / y);
+}
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+constant spvUnsafeArray<uint, 26> _106 = spvUnsafeArray<uint, 26>({ 589284910u, 521715247u, 487622190u, 521717295u, 1041284159u, 34651199u, 488408622u, 588840497u, 1044517023u, 488129040u, 580033841u, 1041269793u, 588830577u, 589092465u, 488162862u, 35112495u, 748340782u, 580372015u, 520632382u, 138547359u, 488162865u, 145278513u, 599442993u, 581046609u, 138547537u, 1042424351u });
+constant spvUnsafeArray<uint, 119> _287 = spvUnsafeArray<uint, 119>({ 538976288u, 538976288u, 1229997344u, 1162104659u, 542525728u, 538976288u, 538976288u, 538976288u, 1092624416u, 1464159776u, 1397052192u, 1313818963u, 538976288u, 538976288u, 538976288u, 538976288u, 538976288u, 538976288u, 538976288u, 538976288u, 538976288u, 1414078496u, 542329120u, 1162879041u, 1146046802u, 541478688u, 1162433873u, 538976340u, 1145643040u, 1196312908u, 1213472814u, 1163141189u, 1313426770u, 1210076225u, 538989377u, 1162166816u, 1330389070u, 1145391939u, 1213472812u, 1162551365u, 1095713369u, 538985554u, 542329120u, 1279874131u, 1092627532u, 1310737486u, 1327518799u, 1260406094u, 538990917u, 1396787232u, 1162166816u, 1414733902u, 1262703954u, 1380927008u, 1313819680u, 542262599u, 1312901204u, 1498300704u, 541412943u, 1163018563u, 1330913363u, 1296318752u, 539907145u, 538976288u, 538976288u, 538976288u, 538976288u, 538976288u, 538976288u, 538976288u, 1162167328u, 1313415248u, 1162103123u, 1162368032u, 1128353056u, 1162758472u, 538984736u, 1095910944u, 1313164615u, 1213407316u, 1380271169u, 1229935648u, 1327518540u, 538979406u, 1313423696u, 1196312916u, 1481199648u, 542329925u, 1413564500u, 542068256u, 541412943u, 1397301280u, 1162368032u, 1411401042u, 1163075663u, 1461726277u, 1230260545u, 538986318u, 1380927008u, 1162368032u, 1431262240u, 1327515715u, 541139014u, 1196312915u, 538985804u, 1260396576u, 1411406149u, 1163075663u, 1213472852u, 1163075653u, 1330205523u, 538976334u, 538976288u, 1176510496u, 541410642u, 1229014849u, 774778446u, 538976288u, 538976288u });
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float hash11(thread const float& n)
+{
+    return fract(sin(n) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float3 starfield(thread const float2& fragCoord, constant Globals& _390)
+{
+    float cellSize = _390.iResolution[1u] / 42.0;
+    float2 grid = fragCoord / float2(cellSize);
+    float2 cell = floor(grid);
+    float2 param = cell;
+    float seed = hash21(param);
+    if (seed > 0.23999999463558197021484375)
+    {
+        return float3(0.0);
+    }
+    float param_1 = seed * 13.69999980926513671875;
+    float param_2 = seed * 29.299999237060546875;
+    float2 position = float2(hash11(param_1), hash11(param_2));
+    float away = length((fract(grid) - position) * cellSize);
+    float param_3 = seed * 7.099999904632568359375;
+    float brightness = 0.300000011920928955078125 + (0.699999988079071044921875 * hash11(param_3));
+    float param_4 = seed * 3.2999999523162841796875;
+    float twinkle = 0.7799999713897705078125 + (0.2199999988079071044921875 * sin((_390.iTime * (0.60000002384185791015625 + (1.7999999523162841796875 * hash11(param_4)))) + (seed * 90.0)));
+    return ((float3(0.85000002384185791015625, 0.89999997615814208984375, 1.0) * exp(((-away) * away) / 0.4199999868869781494140625)) * brightness) * twinkle;
+}
+
+static inline __attribute__((always_inline))
+uint glyphBits(thread const uint& code)
+{
+    if ((code >= 65u) && (code <= 90u))
+    {
+        return _106[int(code) - 65];
+    }
+    if (code == 46u)
+    {
+        return 134217728u;
+    }
+    if (code == 44u)
+    {
+        return 71303168u;
+    }
+    if (code == 39u)
+    {
+        return 132u;
+    }
+    if (code == 45u)
+    {
+        return 1015808u;
+    }
+    if (code == 33u)
+    {
+        return 134353028u;
+    }
+    if (code == 63u)
+    {
+        return 134357550u;
+    }
+    return 0u;
+}
+
+static inline __attribute__((always_inline))
+float ink(thread const float& column, thread const float& line)
+{
+    float wrapped = mod(floor(line), 26.0);
+    if (wrapped >= 17.0)
+    {
+        return 0.0;
+    }
+    int col = int(floor(column));
+    if ((col < 0) || (col >= 28))
+    {
+        return 0.0;
+    }
+    int index = (int(wrapped) * 28) + col;
+    uint word = _287[index >> 2];
+    uint code = (word >> (uint(index & 3) * 8u)) & 255u;
+    uint param = code;
+    uint bits = glyphBits(param);
+    if (bits == 0u)
+    {
+        return 0.0;
+    }
+    float2 inner = (float2(fract(column), fract(line)) - float2(0.083333335816860198974609375, 0.125)) / float2(0.833333313465118408203125, 0.75);
+    bool _331 = inner.x < 0.0;
+    bool _339;
+    if (!_331)
+    {
+        _339 = inner.x >= 1.0;
+    }
+    else
+    {
+        _339 = _331;
+    }
+    bool _347;
+    if (!_339)
+    {
+        _347 = inner.y < 0.0;
+    }
+    else
+    {
+        _347 = _339;
+    }
+    bool _354;
+    if (!_347)
+    {
+        _354 = inner.y >= 1.0;
+    }
+    else
+    {
+        _354 = _347;
+    }
+    if (_354)
+    {
+        return 0.0;
+    }
+    int2 bit = int2(floor(inner * float2(5.0, 6.0)));
+    return float((bits >> uint((bit.y * 5) + bit.x)) & 1u);
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _390)
+{
+    float2 uv = (fragCoord - (float2(_390.iResolution[0], _390.iResolution[1]) * 0.5)) / float2(_390.iResolution[1u]);
+    uv.y = -uv.y;
+    float2 param = fragCoord;
+    float3 color = starfield(param, _390);
+    float below = 0.4199999868869781494140625 - uv.y;
+    if (below > 0.0)
+    {
+        float aspect = fast::min(_390.iResolution[0u] / _390.iResolution[1u], 1.77777779102325439453125);
+        float stretch = 1.77777779102325439453125 / aspect;
+        float depth = (11.0 * stretch) / below;
+        float nearest = (11.0 * stretch) / 0.920000016689300537109375;
+        float loop = 166.399993896484375;
+        float scrolled = mod(_390.iTime, loop) / 6.400000095367431640625;
+        float line = scrolled - depth;
+        float column = ((uv.x * depth) / 0.75) + 14.0;
+        float pixel = 1.0 / _390.iResolution[1u];
+        float spanX = (depth / 0.75) * pixel;
+        float spanY = ((depth * depth) / (11.0 * stretch)) * pixel;
+        float param_1 = column - (spanX * 0.25);
+        float param_2 = line - (spanY * 0.25);
+        float param_3 = column + (spanX * 0.25);
+        float param_4 = line - (spanY * 0.25);
+        float param_5 = column - (spanX * 0.25);
+        float param_6 = line + (spanY * 0.25);
+        float param_7 = column + (spanX * 0.25);
+        float param_8 = line + (spanY * 0.25);
+        float cover = ((ink(param_1, param_2) + ink(param_3, param_4)) + ink(param_5, param_6)) + ink(param_7, param_8);
+        cover *= 0.25;
+        float faded = 1.0 - smoothstep(nearest + 7.0, nearest + 14.0, depth);
+        float legible = 1.0 - smoothstep(0.0500000007450580596923828125, 0.14000000059604644775390625, spanY);
+        color = mix(color, float3(1.0, 0.87000000476837158203125, 0.12999999523162841796875), float3(cover * fast::min(faded, legible)));
+    }
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _390 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _390);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/synthwave.glsl
+    public static let synthwave = ShaderProgram(
+        name: "synthwave",
+        summary: "The retro grid: a banded sun on the horizon, a neon lattice running away underneath it, and a sky full of haze.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float toLine(thread const float& x)
+{
+    float f = fract(x);
+    return fast::min(f, 1.0 - f);
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _69)
+{
+    float2 uv = (fragCoord - (float2(_69.iResolution[0], _69.iResolution[1]) * 0.5)) / float2(_69.iResolution[1u]);
+    uv.y = -uv.y;
+    float pixel = 1.0 / _69.iResolution[1u];
+    float3 color;
+    if (uv.y > 0.0599999986588954925537109375)
+    {
+        float up = uv.y - 0.0599999986588954925537109375;
+        color = mix(float3(0.319999992847442626953125, 0.039999999105930328369140625, 0.3400000035762786865234375), float3(0.02999999932944774627685546875, 0.00999999977648258209228515625, 0.100000001490116119384765625), float3(smoothstep(0.0, 0.550000011920928955078125, up)));
+        float2 cell = floor(fragCoord / float2(_69.iResolution[1u] / 40.0));
+        float2 param = cell;
+        float seed = hash21(param);
+        if (seed < 0.100000001490116119384765625)
+        {
+            float2 inCell = fract(fragCoord / float2(_69.iResolution[1u] / 40.0));
+            float2 param_1 = cell + float2(3.7000000476837158203125);
+            float2 param_2 = cell + float2(9.1000003814697265625);
+            float2 at = float2(hash21(param_1), hash21(param_2));
+            float star = exp((-dot(inCell - at, inCell - at)) * 260.0);
+            color += (((float3(0.89999997615814208984375, 0.85000002384185791015625, 1.0) * star) * smoothstep(0.0, 0.3499999940395355224609375, up)) * 0.89999997615814208984375);
+        }
+        float2 toSun = float2(uv.x, up - 0.12600000202655792236328125);
+        float sun = length(toSun);
+        float inSun = 1.0 - smoothstep(0.300000011920928955078125 - (pixel * 2.0), 0.300000011920928955078125, sun);
+        if (inSun > 0.0)
+        {
+            float down = (0.12600000202655792236328125 - up) / 0.300000011920928955078125;
+            float slot = 0.0;
+            if (down > 0.0)
+            {
+                float param_3 = down * 9.0;
+                float band = toLine(param_3);
+                slot = 1.0 - smoothstep(0.0, mix(0.0500000007450580596923828125, 0.4000000059604644775390625, down / 0.4199999868869781494140625), band);
+            }
+            float3 face = mix(float3(1.0, 0.1599999964237213134765625, 0.4600000083446502685546875), float3(1.0, 0.87000000476837158203125, 0.319999992847442626953125), float3(smoothstep(-0.300000011920928955078125, 0.300000011920928955078125, toSun.y)));
+            color = mix(color, face, float3(inSun * (1.0 - slot)));
+        }
+        color += (float3(0.300000011920928955078125, 0.13320000469684600830078125, 0.121200002729892730712890625) * exp((-sun) * 5.0));
+    }
+    else
+    {
+        float below = 0.0599999986588954925537109375 - uv.y;
+        float depth = 0.3400000035762786865234375 / below;
+        float across = (uv.x * depth) / 0.3400000035762786865234375;
+        float along = depth - (_69.iTime * 0.550000011920928955078125);
+        float spanAcross = (depth / 0.3400000035762786865234375) * pixel;
+        float spanAlong = ((depth * depth) / 0.3400000035762786865234375) * pixel;
+        float halfWidth = 0.800000011920928955078125;
+        float param_4 = across;
+        float param_5 = along;
+        float line = fast::max((1.0 - smoothstep(spanAcross * halfWidth, spanAcross * (halfWidth + 1.0), toLine(param_4))) * (1.0 - smoothstep(0.100000001490116119384765625, 0.319999992847442626953125, spanAcross)), (1.0 - smoothstep(spanAlong * halfWidth, spanAlong * (halfWidth + 1.0), toLine(param_5))) * (1.0 - smoothstep(0.100000001490116119384765625, 0.319999992847442626953125, spanAlong)));
+        color = float3(0.0500000007450580596923828125, 0.00999999977648258209228515625, 0.0900000035762786865234375);
+        float reach = 1.0 - smoothstep(3.5, 13.0, depth);
+        color += ((float3(0.300000011920928955078125, 1.0, 0.949999988079071044921875) * line) * reach);
+        color += (float3(0.014999999664723873138427734375, 0.0500000007450580596923828125, 0.04749999940395355224609375) * reach);
+        color += (float3(0.20000000298023223876953125, 0.0320000015199184417724609375, 0.092000000178813934326171875) * exp((-below) * 6.0));
+    }
+    color += (float3(0.3555000126361846923828125, 0.18539999425411224365234375, 0.2731499969959259033203125) * exp((-abs(uv.y - 0.0599999986588954925537109375)) * 520.0));
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _69 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _69);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/toasters.glsl
+    public static let toasters = ShaderProgram(
+        name: "toasters",
+        summary: "After Dark's flying toasters, with the toast.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float sdRoundedBox(thread const float2& p, thread const float2& halfSize, thread const float& radius)
+{
+    float2 d = (abs(p) - halfSize) + float2(radius);
+    return (length(fast::max(d, float2(0.0))) + fast::min(fast::max(d.x, d.y), 0.0)) - radius;
+}
+
+static inline __attribute__((always_inline))
+float sdEllipse(thread const float2& p, thread const float2& radii)
+{
+    return (length(p / radii) - 1.0) * fast::min(radii.x, radii.y);
+}
+
+static inline __attribute__((always_inline))
+float fill(thread const float& d, thread const float& aa)
+{
+    return 1.0 - smoothstep(-aa, aa, d);
+}
+
+static inline __attribute__((always_inline))
+float4 toast(thread const float2& p, thread const float& seed, thread const float& aa)
+{
+    float2 param = p - float2(0.0, 0.100000001490116119384765625);
+    float2 param_1 = float2(0.319999992847442626953125, 0.2199999988079071044921875);
+    float param_2 = 0.070000000298023223876953125;
+    float square = sdRoundedBox(param, param_1, param_2);
+    float2 param_3 = p - float2(0.0, -0.119999997317790985107421875);
+    float2 param_4 = float2(0.319999992847442626953125, 0.189999997615814208984375);
+    float dome = sdEllipse(param_3, param_4);
+    float d = fast::min(square, dome);
+    float param_5 = d;
+    float param_6 = aa;
+    float shape = fill(param_5, param_6);
+    if (shape <= 0.0)
+    {
+        return float4(0.0);
+    }
+    float crust = smoothstep(-0.07500000298023223876953125, -0.04500000178813934326171875, d);
+    float toasting = 0.910000026226043701171875 + ((0.0900000035762786865234375 * sin((p.x * 12.0) + (seed * 30.0))) * sin((p.y * 9.0) - (seed * 11.0)));
+    float3 colour = mix(float3(0.87000000476837158203125, 0.680000007152557373046875, 0.36000001430511474609375) * toasting, float3(0.519999980926513671875, 0.319999992847442626953125, 0.12999999523162841796875), float3(crust));
+    return float4(colour, shape);
+}
+
+static inline __attribute__((always_inline))
+float2x2 rotation(thread const float& angle)
+{
+    float c = cos(angle);
+    float s = sin(angle);
+    return float2x2(float2(c, s), float2(-s, c));
+}
+
+static inline __attribute__((always_inline))
+float4 wing(thread const float2& p, thread const float2& pivot, thread const float& angle, thread const float& aa)
+{
+    float param = angle;
+    float2 w = rotation(param) * (p - pivot);
+    float2 param_1 = w - float2(0.3300000131130218505859375, 0.0);
+    float2 param_2 = float2(0.36000001430511474609375, 0.1550000011920928955078125);
+    float d = sdEllipse(param_1, param_2);
+    float param_3 = d;
+    float param_4 = aa;
+    float shape = fill(param_3, param_4);
+    if (shape <= 0.0)
+    {
+        return float4(0.0);
+    }
+    float groove = abs(fract(w.x * 3.0) - 0.5) * 2.0;
+    float shade = mix(0.87999999523162841796875, 1.0, smoothstep(0.25, 0.64999997615814208984375, groove)) * mix(0.660000026226043701171875, 1.0, smoothstep(0.1500000059604644775390625, -0.0500000007450580596923828125, w.y));
+    return float4(float3(0.87999999523162841796875, 0.920000016689300537109375, 0.980000019073486328125) * shade, shape);
+}
+
+static inline __attribute__((always_inline))
+float4 over(thread const float4& top, thread const float4& bottom)
+{
+    float alpha = top.w + (bottom.w * (1.0 - top.w));
+    if (alpha <= 0.0)
+    {
+        return float4(0.0);
+    }
+    return float4(((top.xyz * top.w) + ((bottom.xyz * bottom.w) * (1.0 - top.w))) / float3(alpha), alpha);
+}
+
+static inline __attribute__((always_inline))
+float4 toaster(thread const float2& p, thread const float& seed, thread const float& aa, constant Globals& _272)
+{
+    float flap = sin(((_272.iTime * 5.19999980926513671875) * (0.800000011920928955078125 + (0.4000000059604644775390625 * seed))) + (seed * 39.0));
+    float2 param = p;
+    float2 param_1 = float2(0.300000011920928955078125, -0.14000000059604644775390625);
+    float param_2 = 0.949999988079071044921875 - (flap * 0.4000000059604644775390625);
+    float param_3 = aa;
+    float4 image = wing(param, param_1, param_2, param_3);
+    float2 param_4 = p;
+    float2 param_5 = float2(0.1599999964237213134765625, -0.2800000011920928955078125);
+    float param_6 = 0.4199999868869781494140625 + (flap * 0.4600000083446502685546875);
+    float param_7 = aa;
+    float4 param_8 = wing(param_4, param_5, param_6, param_7);
+    float4 param_9 = image;
+    image = over(param_8, param_9);
+    float2 param_10 = p;
+    float2 param_11 = float2(0.5, 0.319999992847442626953125);
+    float param_12 = 0.0900000035762786865234375;
+    float body = sdRoundedBox(param_10, param_11, param_12);
+    float param_13 = body;
+    float param_14 = aa;
+    float onBody = fill(param_13, param_14);
+    if (onBody > 0.0)
+    {
+        float down = (p.y + 0.319999992847442626953125) / 0.63999998569488525390625;
+        float3 metal = mix(float3(0.930000007152557373046875, 0.959999978542327880859375, 1.0), float3(0.550000011920928955078125, 0.62000000476837158203125, 0.7400000095367431640625), float3(smoothstep(0.0, 0.5, down)));
+        metal = mix(metal, float3(0.12999999523162841796875, 0.1599999964237213134765625, 0.23999999463558197021484375), float3(smoothstep(0.62000000476837158203125, 0.920000016689300537109375, down)));
+        metal = mix(metal, float3(0.550000011920928955078125, 0.62000000476837158203125, 0.7400000095367431640625), float3(0.75 * smoothstep(0.930000007152557373046875, 1.0, down)));
+        float2 param_15 = p - float2(-0.2800000011920928955078125, -0.0199999995529651641845703125);
+        float2 param_16 = float2(0.070000000298023223876953125, 0.20000000298023223876953125);
+        float param_17 = sdEllipse(param_15, param_16);
+        float param_18 = aa;
+        metal = mix(metal, float3(0.930000007152557373046875, 0.959999978542327880859375, 1.0), float3(0.449999988079071044921875 * fill(param_17, param_18)));
+        float4 param_19 = float4(metal, onBody);
+        float4 param_20 = image;
+        image = over(param_19, param_20);
+        float2 param_21 = p - float2(-0.0199999995529651641845703125, -0.2199999988079071044921875);
+        float2 param_22 = float2(0.300000011920928955078125, 0.048000000417232513427734375);
+        float param_23 = 0.0350000001490116119384765625;
+        float slot = sdRoundedBox(param_21, param_22, param_23);
+        float param_24 = slot;
+        float param_25 = aa;
+        float4 param_26 = float4(0.02999999932944774627685546875, 0.039999999105930328369140625, 0.0599999986588954925537109375, fill(param_24, param_25) * onBody);
+        float4 param_27 = image;
+        image = over(param_26, param_27);
+    }
+    float2 param_28 = p - float2(0.4600000083446502685546875, -0.0599999986588954925537109375);
+    float2 param_29 = float2(0.0599999986588954925537109375, 0.085000000894069671630859375);
+    float param_30 = 0.039999999105930328369140625;
+    float lever = sdRoundedBox(param_28, param_29, param_30);
+    float param_31 = lever;
+    float param_32 = aa;
+    float4 param_33 = float4(0.660000026226043701171875, 0.744000017642974853515625, 0.888000011444091796875, fill(param_31, param_32));
+    float4 param_34 = image;
+    image = over(param_33, param_34);
+    return image;
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _272)
+{
+    float2 p = (fragCoord - (float2(_272.iResolution[0], _272.iResolution[1]) * 0.5)) / float2(_272.iResolution[1u]);
+    float pixel = 1.0 / _272.iResolution[1u];
+    float2 heading = float2(-0.921982109546661376953125, 0.387232482433319091796875);
+    float2x2 toLane = float2x2(float2(heading.x, -heading.y), float2(heading.y, heading.x));
+    float2x2 fromLane = float2x2(float2(heading.x, heading.y), float2(-heading.y, heading.x));
+    float4 image = float4(0.0);
+    float4 _736;
+    for (int layer = 0; layer < 2; layer++)
+    {
+        float near = float(layer) / 1.0;
+        float tile = mix(0.23000000417232513427734375, 0.36000001430511474609375, near);
+        float speed = mix(0.14000000059604644775390625, 0.2599999904632568359375, near);
+        float scale = 0.519999980926513671875;
+        float aa = pixel / (tile * scale);
+        float2 lane = (toLane * p) / float2(tile);
+        lane.x -= ((_272.iTime * speed) / tile);
+        float2 home = floor(lane);
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                float2 cell = home + float2(float(dx), float(dy));
+                float2 param = cell + float2(float(layer) * 31.700000762939453125);
+                float seed = hash21(param);
+                float2 param_1 = cell + float2(5.099999904632568359375);
+                float2 param_2 = cell + float2(8.30000019073486328125);
+                float2 jitter = (float2(hash21(param_1), hash21(param_2)) * 0.3400000035762786865234375) - float2(0.17000000178813934326171875);
+                float2 local = (fromLane * (lane - ((cell + float2(0.5)) + jitter))) / float2(scale);
+                bool _720 = abs(local.x) > 1.14999997615814208984375;
+                bool _728;
+                if (!_720)
+                {
+                    _728 = abs(local.y) > 1.14999997615814208984375;
+                }
+                else
+                {
+                    _728 = _720;
+                }
+                if (_728)
+                {
+                    continue;
+                }
+                if (seed < 0.2800000011920928955078125)
+                {
+                    float2 param_3 = local;
+                    float param_4 = seed;
+                    float param_5 = aa;
+                    _736 = toast(param_3, param_4, param_5);
+                }
+                else
+                {
+                    float2 param_6 = local;
+                    float param_7 = seed;
+                    float param_8 = aa;
+                    _736 = toaster(param_6, param_7, param_8, _272);
+                }
+                float4 drawn = _736;
+                float4 _757 = drawn;
+                float3 _759 = _757.xyz * mix(0.519999980926513671875, 1.0, near);
+                drawn.x = _759.x;
+                drawn.y = _759.y;
+                drawn.z = _759.z;
+                float4 param_9 = drawn;
+                float4 param_10 = image;
+                image = over(param_9, param_10);
+            }
+        }
+    }
+    float3 color = mix(float3(0.01400000043213367462158203125, 0.01600000075995922088623046875, 0.02999999932944774627685546875), image.xyz, float3(image.w));
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _272 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _272);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/tunnel.glsl
+    public static let tunnel = ShaderProgram(
+        name: "tunnel",
+        summary: "The demoscene tunnel: a cylinder unrolled by polar coordinates, with a grid on the inside of it and a camera that sways as it flies.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+// Implementation of the GLSL mod() function, which is slightly different than Metal fmod()
+template<typename Tx, typename Ty>
+inline Tx mod(Tx x, Ty y)
+{
+    return x - y * floor(x / y);
+}
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float toEdge(thread const float& x)
+{
+    float f = fract(x);
+    return fast::min(f, 1.0 - f);
+}
+
+static inline __attribute__((always_inline))
+float3 palette(thread const float& t)
+{
+    return float3(0.5) + (cos((float3(t) + float3(0.0, 0.2800000011920928955078125, 0.550000011920928955078125)) * 6.28318023681640625) * 0.5);
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _72)
+{
+    float2 drift = float2(sin(_72.iTime * 0.310000002384185791015625), sin((_72.iTime * 0.23000000417232513427734375) + 1.7000000476837158203125)) * 0.10999999940395355224609375;
+    float2 p = ((fragCoord - (float2(_72.iResolution[0], _72.iResolution[1]) * 0.5)) / float2(_72.iResolution[1u])) - drift;
+    float radius = fast::max(length(p), 9.9999997473787516355514526367188e-05);
+    float around = precise::atan2(p.y, p.x) * 0.15915493667125701904296875;
+    float depth = (0.3400000035762786865234375 / radius) + (_72.iTime * 0.85000002384185791015625);
+    float twisted = around + (depth * 0.054999999701976776123046875);
+    float pixel = 1.0 / _72.iResolution[1u];
+    float ringSpan = ((0.3400000035762786865234375 / (radius * radius)) * pixel) * 2.599999904632568359375;
+    float panelSpan = ((pixel / radius) * 0.15915493667125701904296875) * 16.0;
+    float param = depth * 2.599999904632568359375;
+    float ring = toEdge(param);
+    float param_1 = twisted * 16.0;
+    float panel = toEdge(param_1);
+    float seam = fast::max(1.0 - smoothstep(ringSpan * 0.60000002384185791015625, ringSpan * 1.7999999523162841796875, ring), 1.0 - smoothstep(panelSpan * 0.60000002384185791015625, panelSpan * 1.7999999523162841796875, panel));
+    float checker = mod(floor(depth * 2.599999904632568359375) + floor(twisted * 16.0), 2.0);
+    float param_2 = (depth * 0.0599999986588954925537109375) + (_72.iTime * 0.0199999995529651641845703125);
+    float3 hue = palette(param_2);
+    float3 color = mix(float3(0.013500000350177288055419921875, 0.022500000894069671630859375, 0.063000001013278961181640625), float3(0.04500000178813934326171875, 0.07500000298023223876953125, 0.20999999344348907470703125), float3(checker));
+    color += ((mix(float3(0.3499999940395355224609375, 0.949999988079071044921875, 1.0), hue, float3(0.550000011920928955078125)) * seam) * 1.25);
+    float fog = smoothstep(0.0, 0.4199999868869781494140625, radius);
+    color *= fog;
+    color += ((mix(float3(0.3499999940395355224609375, 0.949999988079071044921875, 1.0), hue, float3(0.5)) * 0.20000000298023223876953125) * exp((-radius) * 8.0));
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _72 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _72);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
     /// Every converted shader, for selecting one by name.
-    public static let all: [ShaderProgram] = [gradient, matrix]
+    public static let all: [ShaderProgram] = [aurora, gradient, hyperspace, matrix, mystify, starwars, synthwave, toasters, tunnel]
 }
