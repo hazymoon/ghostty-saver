@@ -54,5 +54,17 @@ jobs:
         # test's own assumptions rather than in the environment.
         run: .build/debug/ghostty-saver --verify --size 64x64
 
+      - name: Render a sequence
+        # The frame sequence Scripts/record-demo.sh is built on. `swift test`
+        # cannot reach it - it lives in the executable rather than in SaverCore
+        # - so this is where it gets checked, and what it checks is that the
+        # frames advance through iTime, not merely that three files appeared.
+        run: |
+          out="$RUNNER_TEMP/sequence"
+          .build/debug/ghostty-saver --shader matrix --size 96x64 \
+            --dump "$out" --at 1.0 --frames 3 --fps 10
+          test "$(ls "$out"/*.png | wc -l)" -eq 3
+          test "$(shasum -a 256 "$out"/*.png | awk '{print $1}' | sort -u | wc -l)" -eq 3
+
       - name: Test
         run: swift test
