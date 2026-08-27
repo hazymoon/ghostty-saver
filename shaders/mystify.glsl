@@ -14,6 +14,13 @@ const float TRAIL_STEP = 0.10;    // seconds between one trailing copy and the n
 const float LINE_WIDTH = 1.3;     // px, at the leading copy
 const float MARGIN = 0.04;        // how far the corners stay off the edges
 
+const float TAU = 6.28318;
+// The ribbon's colour cycle: where the three channels sit in it, how fast the
+// leading edge moves through it, and how far back one trailing copy is.
+const vec3 HUE_PHASE = vec3(0.0, 0.33, 0.67);
+const float HUE_RATE = 0.045;
+const float HUE_PER_STEP = 0.016;
+
 // Per-corner rate and phase: (horizontal rate, vertical rate, horizontal
 // phase, vertical phase). These came out of a hash of the corner index and
 // never depended on iTime or on the pixel, so hashing them here cost every
@@ -43,10 +50,6 @@ float segmentDistance(vec2 p, vec2 a, vec2 b) {
     return length(pa - ba * h);
 }
 
-vec3 palette(float t) {
-    return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.33, 0.67)));
-}
-
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // Work in units of screen height so line widths and speeds mean the same
     // thing at any resolution.
@@ -56,7 +59,18 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     vec3 color = vec3(0.0);
 
+    // One trailing copy's hue is the next one's rotated by a fixed angle, so
+    // the trail can be walked with a rotation instead of a cosine per copy.
+    // The hue does not depend on the pixel, and a cosine of a vec3 twelve times
+    // over was the second largest thing in this shader.
+    float stepCos = cos(TAU * HUE_PER_STEP);
+    float stepSin = sin(TAU * HUE_PER_STEP);
+
     for (int shape = 0; shape < SHAPES; shape++) {
+        vec3 angle = TAU * (iTime * HUE_RATE + float(shape) * 0.5 + HUE_PHASE);
+        vec3 hueCos = cos(angle);
+        vec3 hueSin = sin(angle);
+
         for (int step = 0; step < TRAIL; step++) {
             float age = float(step) / float(TRAIL - 1);
             float t = iTime - float(step) * TRAIL_STEP;
@@ -85,8 +99,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             float fade = (1.0 - age) * (1.0 - age);
             // Each copy is drawn in the hue the leading edge had that long ago,
             // which is where the ribbon's colour gradient comes from.
-            vec3 hue = palette(iTime * 0.045 - float(step) * 0.016 + float(shape) * 0.5);
+            vec3 hue = 0.5 + 0.5 * hueCos;
             color += hue * (core + glow) * fade;
+
+            // Rotate back by one step, for the next copy along.
+            vec3 turned = hueCos * stepCos + hueSin * stepSin;
+            hueSin = hueSin * stepCos - hueCos * stepSin;
+            hueCos = turned;
         }
     }
 

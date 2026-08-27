@@ -758,7 +758,7 @@ struct Globals
     float3 iSelectionBackgroundColor;
 };
 
-constant spvUnsafeArray<float4, 8> _214 = spvUnsafeArray<float4, 8>({ float4(0.07386718690395355224609375, 0.12730468809604644775390625, 19.033203125, 18.828125), float4(0.1533203125, 0.14277343451976776123046875, 17.5, 13.369140625), float4(0.077031247317790985107421875, 0.1392578184604644775390625, 3.59375, 10.15625), float4(0.1262499988079071044921875, 0.084589846432209014892578125, 15.546875, 0.859375), float4(0.110561527311801910400390625, 0.1494531333446502685546875, 0.390625, 19.4921875), float4(0.087578125298023223876953125, 0.123964846134185791015625, 10.546875, 12.265625), float4(0.106562502682209014892578125, 0.12871094048023223876953125, 1.2109375, 1.69921875), float4(0.086874999105930328369140625, 0.14330078661441802978515625, 18.173828125, 2.890625) });
+constant spvUnsafeArray<float4, 8> _222 = spvUnsafeArray<float4, 8>({ float4(0.07386718690395355224609375, 0.12730468809604644775390625, 19.033203125, 18.828125), float4(0.1533203125, 0.14277343451976776123046875, 17.5, 13.369140625), float4(0.077031247317790985107421875, 0.1392578184604644775390625, 3.59375, 10.15625), float4(0.1262499988079071044921875, 0.084589846432209014892578125, 15.546875, 0.859375), float4(0.110561527311801910400390625, 0.1494531333446502685546875, 0.390625, 19.4921875), float4(0.087578125298023223876953125, 0.123964846134185791015625, 10.546875, 12.265625), float4(0.106562502682209014892578125, 0.12871094048023223876953125, 1.2109375, 1.69921875), float4(0.086874999105930328369140625, 0.14330078661441802978515625, 18.173828125, 2.890625) });
 
 struct main0_out
 {
@@ -781,28 +781,27 @@ float segmentDistance(thread const float2& p, thread const float2& a, thread con
 }
 
 static inline __attribute__((always_inline))
-float3 palette(thread const float& t)
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _87)
 {
-    return float3(0.5) + (cos((float3(t) + float3(0.0, 0.3300000131130218505859375, 0.670000016689300537109375)) * 6.28318023681640625) * 0.5);
-}
-
-static inline __attribute__((always_inline))
-void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _105)
-{
-    float aspect = _105.iResolution[0u] / _105.iResolution[1u];
-    float2 p = fragCoord / float2(_105.iResolution[1u]);
-    float pixel = 1.0 / _105.iResolution[1u];
+    float aspect = _87.iResolution[0u] / _87.iResolution[1u];
+    float2 p = fragCoord / float2(_87.iResolution[1u]);
+    float pixel = 1.0 / _87.iResolution[1u];
     float3 color = float3(0.0);
+    float stepCos = 0.9949510097503662109375;
+    float stepSin = 0.10036163032054901123046875;
     spvUnsafeArray<float2, 4> points;
     for (int shape = 0; shape < 2; shape++)
     {
+        float3 angle = (float3((_87.iTime * 0.04500000178813934326171875) + (float(shape) * 0.5)) + float3(0.0, 0.3300000131130218505859375, 0.670000016689300537109375)) * 6.28318023681640625;
+        float3 hueCos = cos(angle);
+        float3 hueSin = sin(angle);
         for (int _step = 0; _step < 12; _step++)
         {
             float age = float(_step) / 11.0;
-            float t = _105.iTime - (float(_step) * 0.100000001490116119384765625);
+            float t = _87.iTime - (float(_step) * 0.100000001490116119384765625);
             for (int i = 0; i < 4; i++)
             {
-                float4 m = _214[(shape * 4) + i];
+                float4 m = _222[(shape * 4) + i];
                 float param = (t * m.x) + m.z;
                 float param_1 = (t * m.y) + m.w;
                 points[i] = float2(mix(0.039999999105930328369140625, aspect - 0.039999999105930328369140625, bounce(param)), mix(0.039999999105930328369140625, 0.959999978542327880859375, bounce(param_1)));
@@ -819,21 +818,23 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
             float core = smoothstep(width * 2.0, width * 0.5, nearest);
             float glow = exp((-nearest) / (pixel * 9.0)) * 0.300000011920928955078125;
             float fade = (1.0 - age) * (1.0 - age);
-            float param_5 = ((_105.iTime * 0.04500000178813934326171875) - (float(_step) * 0.01600000075995922088623046875)) + (float(shape) * 0.5);
-            float3 hue = palette(param_5);
+            float3 hue = float3(0.5) + (hueCos * 0.5);
             color += ((hue * (core + glow)) * fade);
+            float3 turned = (hueCos * stepCos) + (hueSin * stepSin);
+            hueSin = (hueSin * stepCos) - (hueCos * stepSin);
+            hueCos = turned;
         }
     }
     color += float3(0.0199999995529651641845703125, 0.0199999995529651641845703125, 0.0500000007450580596923828125);
     fragColor = float4(color, 1.0);
 }
 
-fragment main0_out main0(constant Globals& _105 [[buffer(1)]], float4 gl_FragCoord [[position]])
+fragment main0_out main0(constant Globals& _87 [[buffer(1)]], float4 gl_FragCoord [[position]])
 {
     main0_out out = {};
     float2 param_1 = gl_FragCoord.xy;
     float4 param;
-    mainImage(param, param_1, _105);
+    mainImage(param, param_1, _87);
     out._fragColor = param;
     return out;
 }
