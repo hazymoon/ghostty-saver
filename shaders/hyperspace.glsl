@@ -21,8 +21,8 @@ const float ACCEL = 0.10;         // how hard the wind-up pulls
 const float FLASH_FOR = 0.9;      // seconds of white-out either side of a jump
 const float FLASH_PEAK = 0.82;    // held short of pure white: this runs in a dark room
 
-const float SPREAD = 4.2;         // how fast a star's radius grows with travel
-const float NEAR_EDGE = 1.5;      // radius, in screen heights, a star dies at
+const float SPREAD = 4.2;         // e-foldings of radius a star crosses on its way out
+const float NEAR_EDGE = 1.5;      // radius, in screen heights, it ends that journey at
 const float EXPOSURE = 1.0 / 26.0; // shutter time the streak length stands for
 
 float hash11(float n) {
@@ -77,9 +77,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
         // 0 far, 1 near. Radius grows exponentially with it, which is what a
         // constant closing speed looks like under perspective.
+        //
+        // It lands exactly on NEAR_EDGE at the end rather than somewhere short
+        // of it, which is what the fade below needs: a star that restarts
+        // before that fade has finished blinks out with the screen still under
+        // it.
         float along = fract(seed * 13.0 + travel + depth * 0.611);
-        float head = 0.014 * exp(SPREAD * along);
-        if (head > NEAR_EDGE) { continue; }
+        float head = NEAR_EDGE * exp(SPREAD * (along - 1.0));
 
         float behind = head - radius;
         float reach = streak * head;

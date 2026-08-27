@@ -26,12 +26,14 @@ const float DEPTH = 11.0;         // depth of the bottom edge, in line heights
 const float REFERENCE_ASPECT = 16.0 / 9.0;
 const float CELL_ASPECT = 0.75;   // character advance / line height
 const float LINE_SECONDS = 6.4;   // how long one line takes to climb one line
-// Where the text gives out, in line heights of depth. Fixed rather than left
-// to the resolution, so the crawl is the same length on any screen - and so
-// that a tall screen cannot show enough lines at once to catch the loop
-// wrapping round onto itself.
-const float FADE_FROM = 19.0;
-const float FADE_TO = 26.0;
+// How far back the text reaches, in line heights past the bottom edge of the
+// screen. Measured from that edge rather than from the camera, so the same
+// fourteen lines are in view whatever shape the window is. A threshold fixed
+// in depth instead would grow with the stretch below, and a tall enough window
+// would then hold more lines at once than the loop has, showing the same line
+// twice.
+const float FADE_FROM = 7.0;
+const float FADE_TO = 14.0;
 
 // The glyph sits inside its cell: 5x6 lit bits inside a 6x8 advance.
 const vec2 GLYPH_ORIGIN = vec2(1.0 / 12.0, 1.0 / 8.0);
@@ -175,6 +177,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float aspect = min(iResolution.x / iResolution.y, REFERENCE_ASPECT);
         float stretch = REFERENCE_ASPECT / aspect;   // 1.0 at the reference width, more when narrower
         float depth = DEPTH * stretch / below;
+        // The bottom edge of the screen sits at uv.y = -0.5, and that is where
+        // the visible run of text starts.
+        float nearest = DEPTH * stretch / (HORIZON + 0.5);
 
         // Scrolling by whole loops of the crawl rather than by iTime keeps the
         // numbers small however long the screensaver runs, and the loop period
@@ -200,10 +205,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             + ink(column + spanX * 0.25, line + spanY * 0.25);
         cover *= 0.25;
 
-        // The text fades out with distance the way it does in the film. The
-        // threshold is in reference depths, undoing the stretch above, so that
-        // the same number of lines is in view whatever shape the window is.
-        float faded = 1.0 - smoothstep(FADE_FROM, FADE_TO, depth / stretch);
+        // The text fades out with distance the way it does in the film,
+        // counted from the near edge so the run is the same length on any
+        // window.
+        float faded = 1.0 - smoothstep(nearest + FADE_FROM, nearest + FADE_TO, depth);
         // On a screen too coarse to resolve the glyphs that far back, fade
         // sooner: past the point where one pixel covers most of a glyph row no
         // amount of sampling helps and the text would only shimmer. One glyph

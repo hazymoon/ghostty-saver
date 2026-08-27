@@ -428,24 +428,20 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         float offset = fract(around) - hash11(param_3);
         float sideways = ((abs(offset) / 55.0) * 6.28318023681640625) * radius;
         float along = fract(((seed * 13.0) + travel) + (depth * 0.611000001430511474609375));
-        float head = 0.01400000043213367462158203125 * exp(4.19999980926513671875 * along);
-        if (head > 1.5)
-        {
-            continue;
-        }
+        float head = 1.5 * exp(4.19999980926513671875 * (along - 1.0));
         float behind = head - radius;
         float reach = streak * head;
-        bool _233 = behind < (-pixel);
-        bool _242;
-        if (!_233)
+        bool _228 = behind < (-pixel);
+        bool _237;
+        if (!_228)
         {
-            _242 = behind > (reach + pixel);
+            _237 = behind > (reach + pixel);
         }
         else
         {
-            _242 = _233;
+            _237 = _228;
         }
-        if (_242)
+        if (_237)
         {
             continue;
         }
@@ -1089,6 +1085,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         float aspect = fast::min(v_390.iResolution[0u] / v_390.iResolution[1u], 1.77777779102325439453125);
         float stretch = 1.77777779102325439453125 / aspect;
         float depth = (11.0 * stretch) / below;
+        float nearest = (11.0 * stretch) / 0.920000016689300537109375;
         float loop = 166.399993896484375;
         float scrolled = mod(v_390.iTime, loop) / 6.400000095367431640625;
         float line = scrolled - depth;
@@ -1106,7 +1103,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
         float param_8 = line + (spanY * 0.25);
         float cover = ((ink(param_1, param_2) + ink(param_3, param_4)) + ink(param_5, param_6)) + ink(param_7, param_8);
         cover *= 0.25;
-        float faded = 1.0 - smoothstep(19.0, 26.0, depth / stretch);
+        float faded = 1.0 - smoothstep(nearest + 7.0, nearest + 14.0, depth);
         float legible = 1.0 - smoothstep(0.0500000007450580596923828125, 0.14000000059604644775390625, spanY);
         color = mix(color, float3(1.0, 0.87000000476837158203125, 0.12999999523162841796875), float3(cover * fast::min(faded, legible)));
     }
@@ -1352,8 +1349,8 @@ float4 toast(thread const float2& p, thread const float& seed, thread const floa
     {
         return float4(0.0);
     }
-    float crust = 1.0 - smoothstep(-0.07500000298023223876953125, -0.04500000178813934326171875, d);
-    float toasting = 0.85000002384185791015625 + ((0.1500000059604644775390625 * sin((p.x * 21.0) + (seed * 30.0))) * sin((p.y * 17.0) - (seed * 11.0)));
+    float crust = smoothstep(-0.07500000298023223876953125, -0.04500000178813934326171875, d);
+    float toasting = 0.910000026226043701171875 + ((0.0900000035762786865234375 * sin((p.x * 12.0) + (seed * 30.0))) * sin((p.y * 9.0) - (seed * 11.0)));
     float3 colour = mix(float3(0.87000000476837158203125, 0.680000007152557373046875, 0.36000001430511474609375) * toasting, float3(0.519999980926513671875, 0.319999992847442626953125, 0.12999999523162841796875), float3(crust));
     return float4(colour, shape);
 }
@@ -1443,16 +1440,16 @@ float4 toaster(thread const float2& p, thread const float& seed, thread const fl
         float4 param_26 = float4(0.02999999932944774627685546875, 0.039999999105930328369140625, 0.0599999986588954925537109375, fill(param_24, param_25) * onBody);
         float4 param_27 = image;
         image = over(param_26, param_27);
-        float2 param_28 = p - float2(0.4600000083446502685546875, -0.0599999986588954925537109375);
-        float2 param_29 = float2(0.0599999986588954925537109375, 0.085000000894069671630859375);
-        float param_30 = 0.039999999105930328369140625;
-        float lever = sdRoundedBox(param_28, param_29, param_30);
-        float param_31 = lever;
-        float param_32 = aa;
-        float4 param_33 = float4(0.660000026226043701171875, 0.744000017642974853515625, 0.888000011444091796875, fill(param_31, param_32));
-        float4 param_34 = image;
-        image = over(param_33, param_34);
     }
+    float2 param_28 = p - float2(0.4600000083446502685546875, -0.0599999986588954925537109375);
+    float2 param_29 = float2(0.0599999986588954925537109375, 0.085000000894069671630859375);
+    float param_30 = 0.039999999105930328369140625;
+    float lever = sdRoundedBox(param_28, param_29, param_30);
+    float param_31 = lever;
+    float param_32 = aa;
+    float4 param_33 = float4(0.660000026226043701171875, 0.744000017642974853515625, 0.888000011444091796875, fill(param_31, param_32));
+    float4 param_34 = image;
+    image = over(param_33, param_34);
     return image;
 }
 
@@ -1465,7 +1462,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     float2x2 toLane = float2x2(float2(heading.x, -heading.y), float2(heading.y, heading.x));
     float2x2 fromLane = float2x2(float2(heading.x, heading.y), float2(-heading.y, heading.x));
     float4 image = float4(0.0);
-    float4 _737;
+    float4 _736;
     for (int layer = 0; layer < 2; layer++)
     {
         float near = float(layer) / 1.0;
@@ -1487,17 +1484,17 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
                 float2 param_2 = cell + float2(8.30000019073486328125);
                 float2 jitter = (float2(hash21(param_1), hash21(param_2)) * 0.3400000035762786865234375) - float2(0.17000000178813934326171875);
                 float2 local = (fromLane * (lane - ((cell + float2(0.5)) + jitter))) / float2(scale);
-                bool _721 = abs(local.x) > 1.14999997615814208984375;
-                bool _729;
-                if (!_721)
+                bool _720 = abs(local.x) > 1.14999997615814208984375;
+                bool _728;
+                if (!_720)
                 {
-                    _729 = abs(local.y) > 1.14999997615814208984375;
+                    _728 = abs(local.y) > 1.14999997615814208984375;
                 }
                 else
                 {
-                    _729 = _721;
+                    _728 = _720;
                 }
-                if (_729)
+                if (_728)
                 {
                     continue;
                 }
@@ -1506,21 +1503,21 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
                     float2 param_3 = local;
                     float param_4 = seed;
                     float param_5 = aa;
-                    _737 = toast(param_3, param_4, param_5);
+                    _736 = toast(param_3, param_4, param_5);
                 }
                 else
                 {
                     float2 param_6 = local;
                     float param_7 = seed;
                     float param_8 = aa;
-                    _737 = toaster(param_6, param_7, param_8, v_272);
+                    _736 = toaster(param_6, param_7, param_8, v_272);
                 }
-                float4 drawn = _737;
-                float4 _758 = drawn;
-                float3 _760 = _758.xyz * mix(0.519999980926513671875, 1.0, near);
-                drawn.x = _760.x;
-                drawn.y = _760.y;
-                drawn.z = _760.z;
+                float4 drawn = _736;
+                float4 _757 = drawn;
+                float3 _759 = _757.xyz * mix(0.519999980926513671875, 1.0, near);
+                drawn.x = _759.x;
+                drawn.y = _759.y;
+                drawn.z = _759.z;
                 float4 param_9 = drawn;
                 float4 param_10 = image;
                 image = over(param_9, param_10);

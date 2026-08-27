@@ -97,12 +97,15 @@ vec4 toaster(vec2 p, float seed, float aa) {
         metal = mix(metal, CHROME_LIGHT, 0.45 * fill(sdEllipse(p - vec2(-0.28, -0.02), vec2(0.07, 0.20)), aa));
         image = over(vec4(metal, onBody), image);
 
-        // The slot, and the lever on the side.
+        // The slot is cut into the body, so it is clipped to it.
         float slot = sdRoundedBox(p - vec2(-0.02, -0.22), vec2(0.30, 0.048), 0.035);
         image = over(vec4(SLOT_COLOR, fill(slot, aa) * onBody), image);
-        float lever = sdRoundedBox(p - vec2(0.46, -0.06), vec2(0.06, 0.085), 0.04);
-        image = over(vec4(CHROME_MID * 1.2, fill(lever, aa)), image);
     }
+
+    // The lever stands proud of the side, so it is drawn outside the test
+    // above: inside it, the part that overhangs the body would be cut off.
+    float lever = sdRoundedBox(p - vec2(0.46, -0.06), vec2(0.06, 0.085), 0.04);
+    image = over(vec4(CHROME_MID * 1.2, fill(lever, aa)), image);
 
     return image;
 }
@@ -117,9 +120,11 @@ vec4 toast(vec2 p, float seed, float aa) {
     float shape = fill(d, aa);
     if (shape <= 0.0) { return vec4(0.0); }
 
-    // Crust is the outer band; the crumb inside is lighter and blotchy.
-    float crust = 1.0 - smoothstep(-0.075, -0.045, d);
-    float toasting = 0.85 + 0.15 * sin(p.x * 21.0 + seed * 30.0) * sin(p.y * 17.0 - seed * 11.0);
+    // Crust is the outer band; the crumb inside is lighter and blotchy. The
+    // distance is negative inside, so this rises towards the rim - no `1.0 -`,
+    // which would paint a dark middle inside a pale edge.
+    float crust = smoothstep(-0.075, -0.045, d);
+    float toasting = 0.91 + 0.09 * sin(p.x * 12.0 + seed * 30.0) * sin(p.y * 9.0 - seed * 11.0);
     vec3 colour = mix(TOAST_COLOR * toasting, CRUST_COLOR, crust);
     return vec4(colour, shape);
 }
