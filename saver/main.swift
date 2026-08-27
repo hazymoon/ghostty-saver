@@ -37,12 +37,14 @@ usage: ghostty-saver [options]
   --list-shaders    list the shaders and what they draw, then exit
   --size WxH        state the resolution instead of asking the terminal
   --seconds N       stop after N seconds (default: run until a key is pressed)
-  --frames N        stop after N frames
+  --frames N        stop after N frames; with --dump, how many to write
   --fps N           target frame rate (default 60, 0 for uncapped)
   --quiet-level N   0=replies on (default), 1=errors only, 2=no replies
   --verify          render one frame without a terminal and check shared memory
-  --dump PATH       with --verify, also write the frame to PATH as a PNG
-  --at SECONDS      with --dump, the iTime to render at (default 0)
+  --dump PATH       with --verify, also write the frame to PATH as a PNG.
+                    with --frames, PATH is a directory and the frames are
+                    written to it as a numbered sequence, 1/--fps apart
+  --at SECONDS      with --dump, the iTime of the first frame (default 0)
   --stats           print a per-frame breakdown on exit
   -h, --help        show this message
 """
@@ -147,15 +149,41 @@ func makeRenderer(program: ShaderProgram, width: Int, height: Int) -> MetalRende
 
 // MARK: - Verification
 
-/// Renders without a terminal and reads the result straight out of shared memory.
-func runVerify(program: ShaderProgram, width: Int, height: Int, dumpPath: String?, time: Double) -> Never {
+/// Renders without a terminal and reads the result straight out of shared
+/// memory.
+///
+/// With `--frames`, the dump path is a directory rather than a file and the
+/// render becomes a numbered sequence, one frame every 1/`--fps` of iTime
+/// starting at `--at`. That is what `Scripts/record-demo.sh` turns into the
+/// animation in the README, and the reason it works that way is that the
+/// frames then come off the same Metal path the screensaver runs on, rather
+/// than out of a second renderer written to look like it.
+func runVerify(
+    program: ShaderProgram,
+    width: Int,
+    height: Int,
+    dumpPath: String?,
+    time: Double,
+    frames: Int?,
+    fps: Double
+) -> Never {
     prepareShmTracking()
     let renderer = makeRenderer(program: program, width: width, height: height)
 
     guard var state = ShadertoyState(device: renderer.device, width: renderer.width, height: renderer.height) else {
         fail("could not allocate the uniform buffer")
     }
-    state.update(time: Float(time), frame: 0, frameRate: 60)
+
+    // A sequence is a dump with a count: --frames on its own has nowhere to put
+    // anything, and --dump on its own is the single frame it always was.
+    let count = dumpPath == nil ? nil : frames
+    if count != nil, !(fps > 0) {
+        fail("--fps has to be above zero to space out a sequence of frames")
+    }
+    let rate = fps > 0 ? fps : 60
+    let firstFrame = Int((time * rate).rounded())
+
+    state.update(time: Float(time), frame: firstFrame, frameRate: Float(rate))
 
     report("device        : \(renderer.device.name)")
     report("shader        : \(program.name) (entry point \(program.entryPoint))")
@@ -165,6 +193,9 @@ func runVerify(program: ShaderProgram, width: Int, height: Int, dumpPath: String
     report("uniform       : \(ShadertoyUniformLayout.size) bytes")
 
     do {
+        // One segment for the whole run. The screensaver needs a fresh one per
+        // frame because the terminal unlinks each after reading it; nothing is
+        // reading these.
         let frame = try ShmFrame.create(
             name: makeShmName(pid: getpid(), counter: 0),
             payloadBytes: renderer.payloadBytes
@@ -181,15 +212,37 @@ func runVerify(program: ShaderProgram, width: Int, height: Int, dumpPath: String
         report("  top-left \(pixel(0, 0))  top-right \(pixel(renderer.width - 1, 0))")
         report("  bottom-left \(pixel(0, renderer.height - 1))  bottom-right \(pixel(renderer.width - 1, renderer.height - 1))")
 
-        if let dumpPath {
+        func writeFrame(to path: String) throws {
             try FrameDump.writePNG(
                 pixels: frame.base,
                 width: renderer.width,
                 height: renderer.height,
                 bytesPerRow: renderer.bytesPerRow,
-                to: dumpPath
+                to: path
             )
-            report("wrote \(dumpPath)")
+        }
+
+        if let dumpPath {
+            if let count {
+                guard count > 0 else { fail("--frames has to be above zero") }
+                try FileManager.default.createDirectory(
+                    atPath: dumpPath, withIntermediateDirectories: true
+                )
+                // Zero padded, so the sequence sorts the way ffmpeg reads it.
+                for index in 0..<count {
+                    let at = time + Double(index) / rate
+                    state.update(time: Float(at), frame: firstFrame + index, frameRate: Float(rate))
+                    try renderer.render(into: frame, uniforms: state.uniforms)
+                    let name = String(format: "%05d.png", index)
+                    try writeFrame(to: (dumpPath as NSString).appendingPathComponent(name))
+                }
+                let last = time + Double(count - 1) / rate
+                report("wrote \(count) frames to \(dumpPath)/ "
+                    + "(iTime \(String(format: "%.3f", time)) to \(String(format: "%.3f", last)) at \(rate) fps)")
+            } else {
+                try writeFrame(to: dumpPath)
+                report("wrote \(dumpPath)")
+            }
         }
 
         frame.closeMapping()
@@ -211,7 +264,15 @@ let program = selectShader(named: options.shaderName)
 
 if options.verify {
     let size = options.explicitSize ?? (width: 1920, height: 1080)
-    runVerify(program: program, width: size.width, height: size.height, dumpPath: options.dumpPath, time: options.dumpTime)
+    runVerify(
+        program: program,
+        width: size.width,
+        height: size.height,
+        dumpPath: options.dumpPath,
+        time: options.dumpTime,
+        frames: options.maxFrames,
+        fps: options.targetFPS
+    )
 }
 
 let outputIsTTY = TerminalSession.openOutput(sinkPath: nil)

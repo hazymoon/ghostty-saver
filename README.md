@@ -68,12 +68,14 @@ ghostty-saver [options]
   --list-shaders    list the shaders and what they draw, then exit
   --size WxH        state the resolution instead of asking the terminal
   --seconds N       stop after N seconds (default: run until a key is pressed)
-  --frames N        stop after N frames
+  --frames N        stop after N frames; with --dump, how many to write
   --fps N           target frame rate (default 60, 0 for uncapped)
   --quiet-level N   0=replies on (default), 1=errors only, 2=no replies
   --verify          render one frame without a terminal and check shared memory
-  --dump PATH       with --verify, also write the frame to PATH as a PNG
-  --at SECONDS      with --dump, the iTime to render at (default 0)
+  --dump PATH       with --verify, also write the frame to PATH as a PNG.
+                    with --frames, PATH is a directory and the frames are
+                    written to it as a numbered sequence, 1/--fps apart
+  --at SECONDS      with --dump, the iTime of the first frame (default 0)
   --stats           print a per-frame breakdown on exit
 ```
 
@@ -103,6 +105,31 @@ more than one. It never picks `gradient`.
 ```tmux
 set -g lock-command '~/.local/bin/ghostty-saver --shader random'
 ```
+
+### Recording the demo
+
+```sh
+brew install ffmpeg gifsicle
+swift build -c release
+Scripts/record-demo.sh
+```
+
+That renders two seconds of each shader and writes `demo.gif`. The frames come
+out of the screensaver's own binary, through Metal, by way of `--dump` with
+`--frames` - rendering the shaders a second time somewhere else would produce a
+picture of something that is not quite what ships.
+
+Each clip gets its own palette. Eight shaders share nothing: a matrix green, a
+sunset, an aurora. One colour table across the lot bands every gradient in the
+set, and a GIF is allowed a palette per frame, so there is no reason to make
+them share one.
+
+The GIF is not committed. It is a couple of megabytes that would change every
+time a shader is touched, so it goes on a release or an issue and this file
+points at the URL.
+
+`--width`, `--fps`, `--seconds`, `--colors` and `--lossy` trade size against
+smoothness; `--keep` leaves the PNG frames behind to look at.
 
 ## Writing a shader
 

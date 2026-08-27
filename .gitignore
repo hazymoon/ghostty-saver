@@ -1,2 +1,4 @@
 .build/
 .wt/
+# Scripts/record-demo.sh writes this; it goes on a release, not in here.
+demo.gif
