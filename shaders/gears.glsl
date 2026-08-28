@@ -21,7 +21,7 @@
 // short overshoot as it lands, and G is driven off it so the pair step
 // together while the rest of the train turns steadily.
 //
-// Per pixel the loop is over seven wheels, each bounded first by the distance
+// Per pixel each of the seven wheels is tried, bounded first by the distance
 // to its centre less its outer radius, so only the pixels on or near a wheel
 // pay for the tooth profile and the hatching. The shading is
 // shaders/lib/hatch.glsl: tone comes from a raking light on the rim and the
@@ -49,8 +49,6 @@ const vec2 CENTRE[WHEELS] = vec2[WHEELS](
     vec2( 0.4610, -0.3367)    // G  9, off F at -140
 );
 const float TEETH[WHEELS] = float[WHEELS](30.0, 12.0, 36.0, 14.0, 22.0, 24.0, 9.0);
-// Which wheel drives each one; -1 for the two that are driven by time.
-const int DRIVER[WHEELS] = int[WHEELS](-1, 0, 1, 2, 3, -1, 5);
 
 float pitchRadius(int i) { return MODULE * TEETH[i] * 0.5; }
 
@@ -77,6 +75,57 @@ float phaseFor(int driven, int driver, float driverAngle) {
     return alpha + 3.14159265 - fj * 6.2831853 / TEETH[driven];
 }
 
+// Everything one wheel contributes to the pixel: outline, hub, windows and
+// hatching, or 0 beyond its tips.
+float wheel(int i, float angle, vec2 uv, vec2 fragCoord, float pixel, vec2 light) {
+    float r = pitchRadius(i);
+    float outer = r + MODULE * 0.9;
+    vec2 p = uv - CENTRE[i];
+    float dist = length(p);
+    // Cheap bound: nothing of this wheel is drawn beyond its tips.
+    if (dist - outer > pixel * 2.0) return 0.0;
+
+    float theta = atan(p.y, p.x) - angle;
+    float u = fract(theta * TEETH[i] / 6.2831853);
+    float root = r - MODULE * 1.0;
+    float radius = root + (outer - root) * toothProfile(u);
+    float rim = dist - radius;
+    // The rate only softens the far edge of each line: near the hub the
+    // tooth angle turns fast enough that fwidth is many pixels, and a
+    // symmetric smoothstep would smear half-drawn ink across the centre.
+    float rate = fwidth(rim);
+    float halfWidth = LINE_PX * 0.5 * pixel;
+    float outline = 1.0 - smoothstep(halfWidth, halfWidth + rate, abs(rim));
+
+    // A hub, and on the larger wheels three windows cut between spokes:
+    // an outline around each and no hatching inside.
+    float hub = r * 0.22;
+    float hubLine = 1.0 - smoothstep(halfWidth, halfWidth + fwidth(dist), abs(dist - hub));
+    float window = 0.0;
+    float windowLine = 0.0;
+    if (TEETH[i] >= 20.0) {
+        float s = abs(fract(theta * 3.0 / 6.2831853 + 0.5) - 0.5) * dist * 6.2831853 / 3.0;
+        float w = min(min(s - r * 0.12, dist - hub - r * 0.12), root - r * 0.28 - dist);
+        float wr = fwidth(w);
+        window = smoothstep(-wr, wr, w);
+        windowLine = 1.0 - smoothstep(halfWidth, halfWidth + wr, abs(w));
+    }
+    float inside = 1.0 - smoothstep(0.0, rate, rim);
+
+    // Tone across the face: lit where the rim faces the light, darker
+    // towards the tips, and the hatch runs around the wheel.
+    float facing = 0.5 + 0.5 * dot(normalize(p), light);
+    float tone = 0.78 - 0.45 * (1.0 - facing) * smoothstep(hub, outer, dist) - 0.15 * smoothstep(root - r * 0.3, outer, dist);
+    // One stroke direction per wheel, turned a little from its
+    // neighbours', the way a burin cuts one patch at a time: a direction
+    // that followed the rim would spin the strokes into a whorl at the hub.
+    float strokeAngle = 0.6 + float(i) * 0.5;
+    vec2 stroke = vec2(cos(strokeAngle), sin(strokeAngle));
+    float shade = hatch(tone, stroke, fragCoord) * 0.6 * inside * (1.0 - window);
+
+    return max(max(outline, hubLine * inside), max(windowLine * inside, shade));
+}
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = (fragCoord - 0.5 * iResolution.xy) / iResolution.y;
     uv.y = -uv.y;
@@ -86,68 +135,31 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // and every other wheel's from the wheel that drives it: phaseFor() gives
     // the angle that meshes with the driver's angle right now, so the ratio
     // and the phase never have to be stated separately. Seven atan calls per
-    // pixel is small next to the loop below.
+    // pixel is small next to the wheels below.
     float land = fract(iTime * TICK);
     float settle = 1.0 - exp(-land * 16.0) * (1.0 - 0.35 * sin(land * 40.0));
     float escape = (floor(iTime * TICK) + settle) * 6.2831853 / TEETH[5];
-    float angle[WHEELS];
-    for (int i = 0; i < WHEELS; i++) {
-        if (i == 0) angle[i] = iTime * DRIVE;
-        else if (i == 5) angle[i] = escape;
-        else angle[i] = phaseFor(i, DRIVER[i], angle[DRIVER[i]]);
-    }
+    // No array of angles: the train is a fixed chain, and a local array
+    // indexed in a loop is the one construct in shaders/ that the CI runner's
+    // Metal has been seen to die on, silently, at pipeline creation.
+    float angleA = iTime * DRIVE;
+    float angleB = phaseFor(1, 0, angleA);
+    float angleC = phaseFor(2, 1, angleB);
+    float angleD = phaseFor(3, 2, angleC);
+    float angleE = phaseFor(4, 3, angleD);
+    float angleF = escape;
+    float angleG = phaseFor(6, 5, angleF);
 
     vec2 light = normalize(vec2(-0.6, 0.8));
     float coverage = 0.0;
 
-    for (int i = 0; i < WHEELS; i++) {
-        float r = pitchRadius(i);
-        float outer = r + MODULE * 0.9;
-        vec2 p = uv - CENTRE[i];
-        float dist = length(p);
-        // Cheap bound: nothing of this wheel is drawn beyond its tips.
-        if (dist - outer > pixel * 2.0) continue;
-
-        float theta = atan(p.y, p.x) - angle[i];
-        float u = fract(theta * TEETH[i] / 6.2831853);
-        float root = r - MODULE * 1.0;
-        float radius = root + (outer - root) * toothProfile(u);
-        float rim = dist - radius;
-        // The rate only softens the far edge of each line: near the hub the
-        // tooth angle turns fast enough that fwidth is many pixels, and a
-        // symmetric smoothstep would smear half-drawn ink across the centre.
-        float rate = fwidth(rim);
-        float halfWidth = LINE_PX * 0.5 * pixel;
-        float outline = 1.0 - smoothstep(halfWidth, halfWidth + rate, abs(rim));
-
-        // A hub, and on the larger wheels three windows cut between spokes:
-        // an outline around each and no hatching inside.
-        float hub = r * 0.22;
-        float hubLine = 1.0 - smoothstep(halfWidth, halfWidth + fwidth(dist), abs(dist - hub));
-        float window = 0.0;
-        float windowLine = 0.0;
-        if (TEETH[i] >= 20.0) {
-            float s = abs(fract(theta * 3.0 / 6.2831853 + 0.5) - 0.5) * dist * 6.2831853 / 3.0;
-            float w = min(min(s - r * 0.12, dist - hub - r * 0.12), root - r * 0.28 - dist);
-            float wr = fwidth(w);
-            window = smoothstep(-wr, wr, w);
-            windowLine = 1.0 - smoothstep(halfWidth, halfWidth + wr, abs(w));
-        }
-        float inside = 1.0 - smoothstep(0.0, rate, rim);
-
-        // Tone across the face: lit where the rim faces the light, darker
-        // towards the tips, and the hatch runs around the wheel.
-        float facing = 0.5 + 0.5 * dot(normalize(p), light);
-        float tone = 0.78 - 0.45 * (1.0 - facing) * smoothstep(hub, outer, dist) - 0.15 * smoothstep(root - r * 0.3, outer, dist);
-        // One stroke direction per wheel, turned a little from its
-        // neighbours', the way a burin cuts one patch at a time: a direction
-        // that followed the rim would spin the strokes into a whorl at the hub.
-        float strokeAngle = 0.6 + float(i) * 0.5;
-        vec2 stroke = vec2(cos(strokeAngle), sin(strokeAngle));
-        float shade = hatch(tone, stroke, fragCoord) * 0.6 * inside * (1.0 - window);
-
-        coverage = max(coverage, max(max(outline, hubLine * inside), max(windowLine * inside, shade)));
-    }
+    coverage = max(coverage, wheel(0, angleA, uv, fragCoord, pixel, light));
+    coverage = max(coverage, wheel(1, angleB, uv, fragCoord, pixel, light));
+    coverage = max(coverage, wheel(2, angleC, uv, fragCoord, pixel, light));
+    coverage = max(coverage, wheel(3, angleD, uv, fragCoord, pixel, light));
+    coverage = max(coverage, wheel(4, angleE, uv, fragCoord, pixel, light));
+    coverage = max(coverage, wheel(5, angleF, uv, fragCoord, pixel, light));
+    coverage = max(coverage, wheel(6, angleG, uv, fragCoord, pixel, light));
 
     vec3 color = mix(GROUND, INK, clamp(coverage, 0.0, 1.0));
     fragColor = vec4(color, 1.0);
