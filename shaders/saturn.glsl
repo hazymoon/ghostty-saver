@@ -34,10 +34,6 @@ const vec3 BAND_TAN = vec3(0.78, 0.66, 0.44);
 const vec3 BAND_OCHRE = vec3(0.62, 0.48, 0.28);
 const vec3 RING_COLOR = vec3(0.86, 0.80, 0.66);
 
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
 // Ring opacity as a function of radius, before lighting. Zero outside.
 float ringDensity(float r, float blur) {
     float inside = smoothstep(RING_INNER - blur, RING_INNER + blur, r)

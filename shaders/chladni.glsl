@@ -30,14 +30,6 @@ const vec3 PLATE_COLOR = vec3(0.045, 0.040, 0.050);
 const vec3 EDGE_COLOR = vec3(0.30, 0.28, 0.26);
 const vec3 BACKGROUND = vec3(0.012, 0.012, 0.016);
 
-float hash11(float n) {
-    return fract(sin(n) * 43758.5453123);
-}
-
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
 // Which (n, m) the plate is ringing at during a given hold. Modes with n == m
 // have f == 0 everywhere and are skipped by construction; the hash keeps the
 // sweep from being a ladder that anyone can predict.
