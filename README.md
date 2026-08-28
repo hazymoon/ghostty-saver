@@ -98,6 +98,7 @@ and termios is put back the way it was.
 | `toasters`   | After Dark's flying toasters, with the toast.                     |
 | `aurora`     | Northern lights over a black ridge line.                          |
 | `contour`    | A contour map whose hills drift, cross-hatched like an engraving. |
+| `gears`      | A gear train that really meshes, with an escapement, as an engraving. |
 | `gradient`   | Not a screensaver: the fixture that proves the conversion works.  |
 
 `--list-shaders` prints the same list, taken from the shaders themselves.
