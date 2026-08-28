@@ -76,6 +76,8 @@ ghostty-saver [options]
                     with --frames, PATH is a directory and the frames are
                     written to it as a numbered sequence, 1/--fps apart
   --at SECONDS      with --dump, the iTime of the first frame (default 0)
+  --date VALUE      pin iDate: an ISO 8601 instant (2026-08-28T21:30:00Z) or
+                    seconds since local midnight. Default: the wall clock
   --stats           print a per-frame breakdown on exit
 ```
 
@@ -222,7 +224,10 @@ swift build -c release
 
 `--at` matters for anything on a long cycle: `hyperspace` only jumps near the
 end of its 22 seconds, and `starwars` takes a couple of minutes to run the
-crawl through.
+crawl through. `--date` is the same thing for the calendar: `iDate` carries
+the real wall clock, so a shader that reads it needs `--date 2026-08-28T21:30:00Z`
+(or `--date 77400`, seconds since midnight) before two dumps can be compared.
+The test suite pins it the same way.
 
 ## Tests
 
