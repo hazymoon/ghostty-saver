@@ -17,6 +17,17 @@ func residentBytes() -> UInt64 {
     return result == KERN_SUCCESS ? info.resident_size : 0
 }
 
+/// Bytes of growth per frame across one window, signed.
+///
+/// Resident size is process-wide and can fall as easily as rise while a window
+/// is being sampled - another suite freeing what it allocated is enough - and
+/// an unsigned subtraction reads that fall as a growth of nearly 2^64 bytes. The
+/// bit pattern reinterpreted as Int64 is the true delta for any realistic
+/// change in either direction.
+func growthPerFrame(before: UInt64, after: UInt64, frames: Int) -> Double {
+    Double(Int64(bitPattern: after &- before)) / Double(frames)
+}
+
 /// A screensaver runs for hours, so anything the frame loop holds on to per
 /// frame turns into hundreds of megabytes. Every frame allocates a Metal
 /// buffer, a texture, a command buffer and an encoder, and those are
@@ -71,7 +82,7 @@ struct MemoryGrowthTests {
             try renderFrames(framesPerWindow, from: counter)
             let after = residentBytes()
             counter += UInt64(framesPerWindow) + 1000
-            perFrame.append(Double(after &- before) / Double(framesPerWindow))
+            perFrame.append(growthPerFrame(before: before, after: after, frames: framesPerWindow))
         }
 
         let median = perFrame.sorted()[1]
@@ -79,5 +90,21 @@ struct MemoryGrowthTests {
             + perFrame.map { String(format: "%.0f", $0) }.joined(separator: ", ")
             + " bytes (median \(String(format: "%.0f", median)))"
         #expect(median < 64, "\(detail)")
+    }
+}
+
+@Suite("resident size delta")
+struct GrowthPerFrameTests {
+    @Test("a window that shrinks reads as negative growth, not as 2^64")
+    func shrinkIsNegative() {
+        // 47 KiB freed over 2000 frames: about -24 bytes per frame.
+        let growth = growthPerFrame(before: 100_000_000, after: 100_000_000 - 48_128, frames: 2000)
+        #expect(growth < 0)
+        #expect(growth > -25)
+    }
+
+    @Test("a window that grows reads as the same positive number as before")
+    func growthIsPositive() {
+        #expect(growthPerFrame(before: 1_000, after: 129_000, frames: 2000) == 64)
     }
 }
