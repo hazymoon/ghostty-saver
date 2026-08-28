@@ -282,6 +282,23 @@ overrides them. `--size`, `--columns` and `--out` do what they say, and
 `--keep` leaves the individual frames next to the sheet. It runs the release
 binary and refuses one older than the sources.
 
+For a shader meant to run under live text as a `custom-shader`, the question
+is whether the text stays readable, and that has a number:
+
+```sh
+Scripts/contrast-check.sh --shader hyperspace --foreground ffffff
+```
+
+That renders the same set of times, computes the WCAG contrast ratio of the
+foreground colour against every pixel, and reports the worst ratio and the
+fraction of each frame below 4.5:1 (`--threshold` changes it). The screensaver
+leaves `iForegroundColor` zero, so the colour has to be given; the default is
+white and `--foreground` can be repeated. For the catalogue this is a reported
+number - nothing is being read over a screensaver, and `hyperspace` whites out
+at its jump by design - and `--gate` turns it into an exit status for a shader
+that has to pass. `Scripts/analyze-contrast.py --self-test` checks the
+arithmetic against WCAG's known pairs.
+
 ## Tests
 
 ```sh
