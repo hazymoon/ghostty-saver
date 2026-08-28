@@ -266,6 +266,21 @@ the real wall clock, so a shader that reads it needs `--date 2026-08-28T21:30:00
 (or `--date 77400`, seconds since midnight) before two dumps can be compared.
 The test suite pins it the same way.
 
+To see a whole cycle at once rather than one frame at a time:
+
+```sh
+brew install ffmpeg
+Scripts/contact-sheet.sh --shader hyperspace
+```
+
+That renders the shader at a set of times through the same `--dump --at` path,
+labels each frame with its `iTime`, and tiles them into one PNG under
+`.build/contact/`. Every shader has its own default times - `hyperspace` is
+sampled around its jump, `starwars` along its crawl - and `--times "0 5 12 30"`
+overrides them. `--size`, `--columns` and `--out` do what they say, and
+`--keep` leaves the individual frames next to the sheet. It runs the release
+binary and refuses one older than the sources.
+
 ## Tests
 
 ```sh
