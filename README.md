@@ -135,6 +135,7 @@ no effect at all.
 | `aurora`     | Northern lights over a black ridge line.                          |
 | `chladni`    | Chladni figures: sand on a vibrating plate, mode after mode.      |
 | `mode7`      | The SNES Mode 7 floor: a tiled plane rotating away to a horizon.  |
+| `moire`      | Two lattices drifting out of phase; the beat swallows the screen. |
 | `gradient`   | Not a screensaver: the fixture that proves the conversion works.  |
 
 `--list-shaders` prints the same list, taken from the shaders themselves.
