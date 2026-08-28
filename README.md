@@ -133,6 +133,7 @@ no effect at all.
 | `synthwave`  | A banded sun on the horizon over a neon grid running away.        |
 | `toasters`   | After Dark's flying toasters, with the toast.                     |
 | `aurora`     | Northern lights over a black ridge line.                          |
+| `chladni`    | Chladni figures: sand on a vibrating plate, mode after mode.      |
 | `gradient`   | Not a screensaver: the fixture that proves the conversion works.  |
 
 `--list-shaders` prints the same list, taken from the shaders themselves.
