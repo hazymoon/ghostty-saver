@@ -667,6 +667,255 @@ fragment main0_out main0(constant Globals& _199 [[buffer(1)]], float4 gl_FragCoo
 }
 """#
     )
+    /// Generated from shaders/moon.glsl
+    public static let moon = ShaderProgram(
+        name: "moon",
+        summary: "The Moon at tonight's phase, nodding through its libration, with the dark limb faintly lit by earthshine.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+// Implementation of the GLSL mod() function, which is slightly different than Metal fmod()
+template<typename Tx, typename Ty>
+inline Tx mod(Tx x, Ty y)
+{
+    return x - y * floor(x / y);
+}
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float daysSinceEpoch(constant Globals& _219)
+{
+    float y = _219.iDate.x;
+    float m = _219.iDate.y + 1.0;
+    float d = _219.iDate.z;
+    float a = floor((14.0 - m) / 12.0);
+    float yy = (y + 4800.0) - a;
+    float mm = (m + (12.0 * a)) - 3.0;
+    float jdn = (((((d + floor(((153.0 * mm) + 2.0) / 5.0)) + (365.0 * yy)) + floor(yy / 4.0)) - floor(yy / 100.0)) + floor(yy / 400.0)) - 32045.0;
+    float seconds = _219.iDate.w + fract(_219.iTime);
+    return ((jdn - 0.5) + (seconds / 86400.0)) - 2451550.25;
+}
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float3x3 rotateY(thread const float& a)
+{
+    float c = cos(a);
+    float s = sin(a);
+    return float3x3(float3(c, 0.0, -s), float3(0.0, 1.0, 0.0), float3(s, 0.0, c));
+}
+
+static inline __attribute__((always_inline))
+float3x3 rotateX(thread const float& a)
+{
+    float c = cos(a);
+    float s = sin(a);
+    return float3x3(float3(1.0, 0.0, 0.0), float3(0.0, c, s), float3(0.0, -s, c));
+}
+
+static inline __attribute__((always_inline))
+float hash31(thread const float3& p)
+{
+    return fract(sin(dot(p, float3(127.09999847412109375, 311.70001220703125, 74.6999969482421875))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float _noise3(thread const float3& p)
+{
+    float3 i = floor(p);
+    float3 f = fract(p);
+    f = (f * f) * (float3(3.0) - (f * 2.0));
+    float3 param = i;
+    float n000 = hash31(param);
+    float3 param_1 = i + float3(1.0, 0.0, 0.0);
+    float n100 = hash31(param_1);
+    float3 param_2 = i + float3(0.0, 1.0, 0.0);
+    float n010 = hash31(param_2);
+    float3 param_3 = i + float3(1.0, 1.0, 0.0);
+    float n110 = hash31(param_3);
+    float3 param_4 = i + float3(0.0, 0.0, 1.0);
+    float n001 = hash31(param_4);
+    float3 param_5 = i + float3(1.0, 0.0, 1.0);
+    float n101 = hash31(param_5);
+    float3 param_6 = i + float3(0.0, 1.0, 1.0);
+    float n011 = hash31(param_6);
+    float3 param_7 = i + float3(1.0);
+    float n111 = hash31(param_7);
+    return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y), mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
+}
+
+static inline __attribute__((always_inline))
+float surface(thread const float3& p, thread float& rim, thread float& maria)
+{
+    float3 param = p * 2.2999999523162841796875;
+    float3 param_1 = p * 4.69999980926513671875;
+    maria = smoothstep(0.519999980926513671875, 0.660000026226043701171875, (_noise3(param) * 0.699999988079071044921875) + (_noise3(param_1) * 0.300000011920928955078125));
+    rim = 0.0;
+    float height = 0.0;
+    for (int layer = 0; layer < 3; layer++)
+    {
+        float scale = 6.0 * powr(2.2000000476837158203125, float(layer));
+        float3 cell = floor(p * scale);
+        float3 inCell = fract(p * scale) - float3(0.5);
+        float3 param_2 = cell + float3(float(layer) * 17.0);
+        float seed = hash31(param_2);
+        if (seed > (0.300000011920928955078125 + (0.119999997317790985107421875 * float(layer))))
+        {
+            continue;
+        }
+        float3 param_3 = cell + float3(1.2999999523162841796875);
+        float3 param_4 = cell + float3(5.69999980926513671875);
+        float3 param_5 = cell + float3(9.1000003814697265625);
+        float3 centre = float3(hash31(param_3), hash31(param_4), hash31(param_5)) - float3(0.5);
+        float3 param_6 = cell + float3(3.2999999523162841796875);
+        float radius = 0.1599999964237213134765625 + (0.180000007152557373046875 * hash31(param_6));
+        float d = length(inCell - (centre * 0.5)) / radius;
+        float bowl = smoothstep(1.0, 0.699999988079071044921875, d) * (-0.3499999940395355224609375);
+        float ring = smoothstep(1.14999997615814208984375, 1.0, d) * smoothstep(0.75, 1.0, d);
+        float weight = 1.0 / (1.0 + (float(layer) * 0.800000011920928955078125));
+        height += ((bowl + ring) * weight);
+        rim += ((ring - smoothstep(1.0, 0.699999988079071044921875, d)) * weight);
+    }
+    return height - (maria * 0.300000011920928955078125);
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _219)
+{
+    float2 uv = (fragCoord - (float2(_219.iResolution[0], _219.iResolution[1]) * 0.5)) / float2(_219.iResolution[1u]);
+    uv.y = -uv.y;
+    float pixel = 1.0 / _219.iResolution[1u];
+    float days = daysSinceEpoch(_219);
+    float age = mod(days, 29.5305881500244140625);
+    float phase = age / 29.5305881500244140625;
+    float phaseAngle = phase * 6.283185482025146484375;
+    float3 sunDir = fast::normalize(float3(sin(phaseAngle), 0.0, -cos(phaseAngle)));
+    float earthshine = 0.5 + (0.5 * cos(phaseAngle));
+    float3 color = float3(0.00999999977648258209228515625, 0.01200000010430812835693359375, 0.0240000002086162567138671875);
+    float2 starCell = floor(fragCoord / float2(_219.iResolution[1u] / 48.0));
+    float2 param = starCell;
+    float starSeed = hash21(param);
+    if (starSeed < 0.0599999986588954925537109375)
+    {
+        float2 inCell = fract(fragCoord / float2(_219.iResolution[1u] / 48.0));
+        float2 param_1 = starCell + float2(3.7000000476837158203125);
+        float2 param_2 = starCell + float2(9.1000003814697265625);
+        float2 at = (float2(hash21(param_1), hash21(param_2)) * 0.800000011920928955078125) + float2(0.100000001490116119384765625);
+        float star = exp((-dot(inCell - at, inCell - at)) * 400.0);
+        float2 param_3 = starCell + float2(1.10000002384185791015625);
+        color += ((float3(0.75, 0.7799999713897705078125, 0.89999997615814208984375) * star) * (0.4000000059604644775390625 + (0.5 * hash21(param_3))));
+    }
+    float2 centre = float2(sin(_219.iTime * 0.07299999892711639404296875), 0.60000002384185791015625 * cos(_219.iTime * 0.046999998390674591064453125)) * 0.0900000035762786865234375;
+    float2 q = (uv - centre) / float2(0.36000001430511474609375);
+    float rr = dot(q, q);
+    float edge = smoothstep(1.0 + ((2.0 * pixel) / 0.36000001430511474609375), 1.0 - ((2.0 * pixel) / 0.36000001430511474609375), rr);
+    if (edge <= 0.0)
+    {
+        fragColor = float4(color, 1.0);
+        return;
+    }
+    float3 n = float3(q, sqrt(fast::max(0.0, 1.0 - rr)));
+    float lat = 0.100000001490116119384765625 * sin((days * 6.283185482025146484375) / 27.2119998931884765625);
+    float lon = 0.100000001490116119384765625 * sin(((days * 6.283185482025146484375) / 27.55500030517578125) + 1.2999999523162841796875);
+    float param_4 = lon;
+    float param_5 = lat;
+    float param_6 = 0.0;
+    float3x3 toSurface = (rotateY(param_4) * rotateX(param_5)) * rotateY(param_6);
+    float3x3 lean = float3x3(float3(0.992808640003204345703125, -0.1197122037410736083984375, 0.0), float3(0.1197122037410736083984375, 0.992808640003204345703125, 0.0), float3(0.0, 0.0, 1.0));
+    float3 p = toSurface * (lean * n);
+    float3 param_7 = p;
+    float param_8;
+    float param_9;
+    float _681 = surface(param_7, param_8, param_9);
+    float rim = param_8;
+    float maria = param_9;
+    float height = _681;
+    float3 tangent = fast::normalize(cross(n, float3(0.0, 1.0, 0.0)));
+    float3 bitangent = cross(n, tangent);
+    float _step = 0.01200000010430812835693359375;
+    float3 param_10 = toSurface * (lean * fast::normalize(n + (tangent * _step)));
+    float param_11;
+    float param_12;
+    float _709 = surface(param_10, param_11, param_12);
+    float unusedRim = param_11;
+    float unusedMaria = param_12;
+    float hx = _709;
+    float3 param_13 = toSurface * (lean * fast::normalize(n + (bitangent * _step)));
+    float param_14;
+    float param_15;
+    float _726 = surface(param_13, param_14, param_15);
+    unusedRim = param_14;
+    unusedMaria = param_15;
+    float hy = _726;
+    float bump = 0.0350000001490116119384765625;
+    float3 shadingNormal = fast::normalize((n - (((tangent * (hx - height)) * bump) / float3(_step))) - (((bitangent * (hy - height)) * bump) / float3(_step)));
+    float albedo = (0.800000011920928955078125 + (height * 0.119999997317790985107421875)) + (rim * 0.100000001490116119384765625);
+    float3 base = mix(float3(1.0), float3(0.939393937587738037109375, 0.939393937587738037109375, 1.0), float3(maria));
+    float sun = smoothstep(-0.02999999932944774627685546875, 0.119999997317790985107421875, dot(shadingNormal, sunDir)) * smoothstep(-0.0199999995529651641845703125, 0.100000001490116119384765625, dot(n, sunDir));
+    float earth = fast::max(0.0, dot(shadingNormal, float3(0.0, 0.0, 1.0))) * earthshine;
+    float3 lit = (base * albedo) * ((float3(0.920000016689300537109375, 0.89999997615814208984375, 0.839999973773956298828125) * sun) + ((float3(0.180000007152557373046875, 0.20999999344348907470703125, 0.300000011920928955078125) * earth) * 0.550000011920928955078125));
+    lit += (float3(0.0108000002801418304443359375, 0.012600000016391277313232421875, 0.017999999225139617919921875) * earthshine);
+    color = mix(color, lit, float3(edge));
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _219 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _219);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
     /// Generated from shaders/mystify.glsl
     public static let mystify = ShaderProgram(
         name: "mystify",
@@ -1672,5 +1921,5 @@ fragment main0_out main0(constant Globals& _72 [[buffer(1)]], float4 gl_FragCoor
 """#
     )
     /// Every converted shader, for selecting one by name.
-    public static let all: [ShaderProgram] = [aurora, gradient, hyperspace, matrix, mystify, starwars, synthwave, toasters, tunnel]
+    public static let all: [ShaderProgram] = [aurora, gradient, hyperspace, matrix, moon, mystify, starwars, synthwave, toasters, tunnel]
 }
