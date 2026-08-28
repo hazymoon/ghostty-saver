@@ -91,7 +91,7 @@ struct UniformTests {
         let device = try #require(MTLCreateSystemDefaultDevice())
         var state = try #require(ShadertoyState(device: device, width: 1920, height: 1080))
 
-        state.update(time: 0.25, frame: 3, frameRate: 60)
+        state.update(time: 0.25, frame: 3, frameRate: 60, date: Date())
         let base = state.uniforms.buffer.contents()
 
         #expect(base.load(fromByteOffset: ShadertoyUniformLayout.iResolution, as: Float.self) == 1920)
@@ -106,8 +106,8 @@ struct UniformTests {
         let device = try #require(MTLCreateSystemDefaultDevice())
         var state = try #require(ShadertoyState(device: device, width: 64, height: 64))
 
-        state.update(time: 1.0, frame: 0, frameRate: 60)
-        state.update(time: 1.25, frame: 1, frameRate: 60)
+        state.update(time: 1.0, frame: 0, frameRate: 60, date: Date())
+        state.update(time: 1.25, frame: 1, frameRate: 60, date: Date())
 
         let delta = state.uniforms.buffer.contents()
             .load(fromByteOffset: ShadertoyUniformLayout.iTimeDelta, as: Float.self)

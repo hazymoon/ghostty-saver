@@ -58,7 +58,7 @@ struct MemoryGrowthTests {
                     name: makeShmName(pid: getpid(), counter: counter + UInt64(index)),
                     payloadBytes: renderer.payloadBytes
                 )
-                state.update(time: Float(index) / 60, frame: index, frameRate: 60)
+                state.update(time: Float(index) / 60, frame: index, frameRate: 60, date: Date())
                 try renderer.render(into: frame, uniforms: state.uniforms)
                 frame.closeMapping()
                 frame.unlink()

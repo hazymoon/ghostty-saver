@@ -24,6 +24,7 @@ struct Options {
     var verify = false
     var dumpPath: String?
     var dumpTime: Double = 0
+    var pinnedDate: Date?
     var stats = false
 }
 
@@ -45,6 +46,8 @@ usage: ghostty-saver [options]
                     with --frames, PATH is a directory and the frames are
                     written to it as a numbered sequence, 1/--fps apart
   --at SECONDS      with --dump, the iTime of the first frame (default 0)
+  --date VALUE      pin iDate: an ISO 8601 instant (2026-08-28T21:30:00Z) or
+                    seconds since local midnight. Default: the wall clock
   --stats           print a per-frame breakdown on exit
   -h, --help        show this message
 
@@ -123,6 +126,14 @@ func parseOptions(defaults: SaverConfig) -> Options {
             options.verify = true
         case "--at":
             options.dumpTime = Double(nextValue(argument)) ?? 0
+        case "--date":
+            let value = nextValue(argument)
+            guard let date = PinnedDate.parse(value) else {
+                FileHandle.standardError.write(Data(
+                    "--date expects an ISO 8601 instant or seconds since midnight: \(value)\n".utf8))
+                exit(2)
+            }
+            options.pinnedDate = date
         case "--stats":
             options.stats = true
         default:
@@ -211,6 +222,7 @@ func runVerify(
     height: Int,
     dumpPath: String?,
     time: Double,
+    date: Date?,
     frames: Int?,
     fps: Double
 ) -> Never {
@@ -230,7 +242,10 @@ func runVerify(
     let rate = fps > 0 ? fps : 60
     let firstFrame = Int((time * rate).rounded())
 
-    state.update(time: Float(time), frame: firstFrame, frameRate: Float(rate))
+    // Pinned once for the whole sequence: a frame's date should not depend on
+    // how long the previous frame took to write.
+    let clock = date ?? Date()
+    state.update(time: Float(time), frame: firstFrame, frameRate: Float(rate), date: clock)
 
     report("device        : \(renderer.device.name)")
     report("shader        : \(program.name) (entry point \(program.entryPoint))")
@@ -278,7 +293,7 @@ func runVerify(
                 // Zero padded, so the sequence sorts the way ffmpeg reads it.
                 for index in 0..<count {
                     let at = time + Double(index) / rate
-                    state.update(time: Float(at), frame: firstFrame + index, frameRate: Float(rate))
+                    state.update(time: Float(at), frame: firstFrame + index, frameRate: Float(rate), date: clock)
                     try renderer.render(into: frame, uniforms: state.uniforms)
                     let name = String(format: "%05d.png", index)
                     try writeFrame(to: (dumpPath as NSString).appendingPathComponent(name))
@@ -328,6 +343,7 @@ if options.verify {
         height: size.height,
         dumpPath: options.dumpPath,
         time: options.dumpTime,
+        date: options.pinnedDate,
         frames: options.maxFrames,
         fps: options.targetFPS
     )
@@ -424,7 +440,8 @@ while !stopped {
     state.update(
         time: Float(frameStart - startedAt),
         frame: Int(frameIndex),
-        frameRate: Float(options.targetFPS)
+        frameRate: Float(options.targetFPS),
+        date: options.pinnedDate ?? Date()
     )
     do {
         try renderer.render(into: frame, uniforms: state.uniforms)
