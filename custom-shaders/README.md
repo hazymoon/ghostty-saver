@@ -35,3 +35,4 @@ has to be judged in a Ghostty window.
 | --- | --- |
 | `lens.glsl` | Bends it around a gravitational lens in the middle of the screen; text past the horizon reddens and goes out. |
 | `raster-rows.glsl` | Shifts each text row sideways by its own amount, a wave running down the screen. Set `CELL_HEIGHT_PX` to your font's cell height. |
+| `carve.glsl` | Casts the glyphs in bronze: strokes stand proud of a stone ground, lit from a raking angle, marched with parallax occlusion mapping. The dearest of the three. |
