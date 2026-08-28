@@ -34,3 +34,4 @@ has to be judged in a Ghostty window.
 | file | what it does to the text |
 | --- | --- |
 | `lens.glsl` | Bends it around a gravitational lens in the middle of the screen; text past the horizon reddens and goes out. |
+| `raster-rows.glsl` | Shifts each text row sideways by its own amount, a wave running down the screen. Set `CELL_HEIGHT_PX` to your font's cell height. |
