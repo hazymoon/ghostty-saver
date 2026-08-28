@@ -24,6 +24,7 @@ struct Options {
     var verify = false
     var dumpPath: String?
     var dumpTime: Double = 0
+    var pinnedDate: Date?
     var stats = false
 }
 
@@ -45,12 +46,27 @@ usage: ghostty-saver [options]
                     with --frames, PATH is a directory and the frames are
                     written to it as a numbered sequence, 1/--fps apart
   --at SECONDS      with --dump, the iTime of the first frame (default 0)
+  --date VALUE      pin iDate: an ISO 8601 instant (2026-08-28T21:30:00Z) or
+                    seconds since local midnight. Default: the wall clock
   --stats           print a per-frame breakdown on exit
   -h, --help        show this message
+
+\(SaverConfig.defaultPath) supplies the defaults for
+--shader, --fps and --quiet-level, plus random-pool: the shaders --shader
+random draws from. The command line wins over it.
 """
 
-func parseOptions() -> Options {
+/// Reads the command line over the top of the config file's defaults.
+///
+/// The config is where `options` starts rather than something consulted when a
+/// flag is missing, which is what makes the order command line > config file >
+/// built-in default without anything having to track which flags were given.
+func parseOptions(defaults: SaverConfig) -> Options {
     var options = Options()
+    if let fps = defaults.fps { options.targetFPS = fps }
+    if let shader = defaults.shaderName { options.shaderName = shader }
+    if let quiet = defaults.quiet { options.quiet = quiet }
+
     var arguments = Array(CommandLine.arguments.dropFirst())
 
     func nextValue(_ flag: String) -> String {
@@ -59,6 +75,11 @@ func parseOptions() -> Options {
             exit(2)
         }
         return arguments.removeFirst()
+    }
+
+    func badValue(_ flag: String, _ value: String, _ expected: String) -> Never {
+        FileHandle.standardError.write(Data("\(flag) expects \(expected): \(value)\n".utf8))
+        exit(2)
     }
 
     while !arguments.isEmpty {
@@ -83,10 +104,21 @@ func parseOptions() -> Options {
             options.seconds = Double(nextValue(argument))
         case "--frames":
             options.maxFrames = Int(nextValue(argument))
+        // A value that does not parse is refused rather than folded back to
+        // the built-in default: with a config file underneath, silently
+        // falling back would look like the file being ignored.
         case "--fps":
-            options.targetFPS = Double(nextValue(argument)) ?? 60
+            let value = nextValue(argument)
+            guard let fps = Double(value), fps.isFinite, fps >= 0 else {
+                badValue(argument, value, "a frame rate of zero or more")
+            }
+            options.targetFPS = fps
         case "--quiet-level":
-            options.quiet = QuietLevel(rawValue: Int(nextValue(argument)) ?? 0) ?? .verbose
+            let value = nextValue(argument)
+            guard let level = Int(value), let quiet = QuietLevel(rawValue: level) else {
+                badValue(argument, value, "0, 1 or 2")
+            }
+            options.quiet = quiet
         case "--verify":
             options.verify = true
         case "--dump":
@@ -94,6 +126,14 @@ func parseOptions() -> Options {
             options.verify = true
         case "--at":
             options.dumpTime = Double(nextValue(argument)) ?? 0
+        case "--date":
+            let value = nextValue(argument)
+            guard let date = PinnedDate.parse(value) else {
+                FileHandle.standardError.write(Data(
+                    "--date expects an ISO 8601 instant or seconds since midnight: \(value)\n".utf8))
+                exit(2)
+            }
+            options.pinnedDate = date
         case "--stats":
             options.stats = true
         default:
@@ -124,14 +164,32 @@ func listShaders() -> Never {
     exit(0)
 }
 
-func selectShader(named name: String?) -> ShaderProgram {
+func selectShader(named name: String?, randomPool: [ShaderProgram]?) -> ShaderProgram {
     guard !GeneratedShaders.all.isEmpty else {
         fail("no shaders were generated; run Scripts/build-shaders.sh")
     }
-    guard let program = ShaderCatalog.select(named: name, from: GeneratedShaders.all) else {
+    guard let program = ShaderCatalog.select(
+        named: name, from: GeneratedShaders.all, randomPool: randomPool
+    ) else {
         fail("no shader named \(name ?? ShaderCatalog.defaultName); available: \(availableShaders)")
     }
     return program
+}
+
+/// Turns the config file's `random-pool` names into shaders.
+///
+/// A name that matches nothing stops startup: the pool is the whole point of
+/// the setting, and one that quietly shrank because of a typo is the kind of
+/// thing nobody notices from the other side of a lock screen.
+func resolveRandomPool(_ names: [String]?) -> [ShaderProgram]? {
+    guard let names else { return nil }
+    let resolved = ShaderCatalog.resolvePool(names, in: GeneratedShaders.all)
+    guard resolved.unknown.isEmpty else {
+        fail("random-pool names no shader called \(resolved.unknown.joined(separator: ", ")); "
+            + "available: \(availableShaders)")
+    }
+    guard !resolved.pool.isEmpty else { fail("random-pool is empty") }
+    return resolved.pool
 }
 
 func makeRenderer(program: ShaderProgram, width: Int, height: Int) -> MetalRenderer {
@@ -164,6 +222,7 @@ func runVerify(
     height: Int,
     dumpPath: String?,
     time: Double,
+    date: Date?,
     frames: Int?,
     fps: Double
 ) -> Never {
@@ -183,7 +242,10 @@ func runVerify(
     let rate = fps > 0 ? fps : 60
     let firstFrame = Int((time * rate).rounded())
 
-    state.update(time: Float(time), frame: firstFrame, frameRate: Float(rate))
+    // Pinned once for the whole sequence: a frame's date should not depend on
+    // how long the previous frame took to write.
+    let clock = date ?? Date()
+    state.update(time: Float(time), frame: firstFrame, frameRate: Float(rate), date: clock)
 
     report("device        : \(renderer.device.name)")
     report("shader        : \(program.name) (entry point \(program.entryPoint))")
@@ -231,7 +293,7 @@ func runVerify(
                 // Zero padded, so the sequence sorts the way ffmpeg reads it.
                 for index in 0..<count {
                     let at = time + Double(index) / rate
-                    state.update(time: Float(at), frame: firstFrame + index, frameRate: Float(rate))
+                    state.update(time: Float(at), frame: firstFrame + index, frameRate: Float(rate), date: clock)
                     try renderer.render(into: frame, uniforms: state.uniforms)
                     let name = String(format: "%05d.png", index)
                     try writeFrame(to: (dumpPath as NSString).appendingPathComponent(name))
@@ -256,11 +318,22 @@ func runVerify(
 
 // MARK: - Startup
 
-let options = parseOptions()
+let configPath = SaverConfig.defaultPath
+let config: SaverConfig
+do {
+    config = try SaverConfig.load(path: configPath)
+} catch {
+    fail("\(error)")
+}
+
+let options = parseOptions(defaults: config)
 
 if options.listShaders { listShaders() }
 
-let program = selectShader(named: options.shaderName)
+let program = selectShader(
+    named: options.shaderName,
+    randomPool: resolveRandomPool(config.randomPool)
+)
 
 if options.verify {
     let size = options.explicitSize ?? (width: 1920, height: 1080)
@@ -270,6 +343,7 @@ if options.verify {
         height: size.height,
         dumpPath: options.dumpPath,
         time: options.dumpTime,
+        date: options.pinnedDate,
         frames: options.maxFrames,
         fps: options.targetFPS
     )
@@ -366,7 +440,8 @@ while !stopped {
     state.update(
         time: Float(frameStart - startedAt),
         frame: Int(frameIndex),
-        frameRate: Float(options.targetFPS)
+        frameRate: Float(options.targetFPS),
+        date: options.pinnedDate ?? Date()
     )
     do {
         try renderer.render(into: frame, uniforms: state.uniforms)
