@@ -92,3 +92,15 @@ jobs:
 
       - name: Test
         run: swift test
+
+      - name: Show crash reports
+        # A test process that dies of a signal leaves the log with every
+        # suite "started" and nothing else - swift test says nothing about
+        # the signal. The crash report on the runner does.
+        if: failure()
+        run: |
+          ls -t ~/Library/Logs/DiagnosticReports/ 2> /dev/null | head -5
+          for report in $(ls -t ~/Library/Logs/DiagnosticReports/*ghostty* ~/Library/Logs/DiagnosticReports/*xctest* ~/Library/Logs/DiagnosticReports/*swift* 2> /dev/null | head -2); do
+            echo "== $report"
+            head -c 20000 "$report"
+          done
