@@ -68,6 +68,16 @@ jobs:
         # test's own assumptions rather than in the environment.
         run: .build/debug/ghostty-saver --verify --size 64x64
 
+      - name: Render every shader once
+        # A shader the runner's Metal cannot build kills the test process
+        # without a word: every suite prints "started" and the log stops. One
+        # frame per shader, one process each, names the shader instead.
+        run: |
+          .build/debug/ghostty-saver --list-shaders | awk '{print $1}' | while read -r name; do
+            echo "== $name"
+            .build/debug/ghostty-saver --shader "$name" --verify --size 64x64
+          done
+
       - name: Render a sequence
         # The frame sequence Scripts/record-demo.sh is built on. `swift test`
         # cannot reach it - it lives in the executable rather than in SaverCore
