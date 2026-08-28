@@ -79,11 +79,47 @@ ghostty-saver [options]
   --date VALUE      pin iDate: an ISO 8601 instant (2026-08-28T21:30:00Z) or
                     seconds since local midnight. Default: the wall clock
   --stats           print a per-frame breakdown on exit
+
+~/.config/ghostty-saver/config supplies the defaults for
+--shader, --fps and --quiet-level, plus random-pool: the shaders --shader
+random draws from. The command line wins over it.
 ```
 
 Any keypress exits. The terminal is restored on exit, on SIGINT, SIGTERM and
 SIGHUP: images are deleted, the cursor comes back, the alternate screen is left
 and termios is put back the way it was.
+
+## Configuration
+
+`~/.config/ghostty-saver/config` holds the defaults, in the same `key = value`
+form as Ghostty's own config. `XDG_CONFIG_HOME` moves it. The file is optional;
+it is read once at startup, because a fresh process is launched on every lock.
+
+```ini
+# half rate, and only the quiet shaders
+fps = 30
+shader = random
+random-pool = matrix, aurora, tunnel
+```
+
+| key           | what it sets                             | default                      |
+| ------------- | ---------------------------------------- | ---------------------------- |
+| `fps`         | target frame rate, 0 for uncapped        | 60                           |
+| `shader`      | which shader to run, or `random`         | `matrix`                     |
+| `quiet-level` | how much the terminal replies: 0, 1 or 2 | 0                            |
+| `random-pool` | the shaders `random` draws from          | every shader but `gradient`  |
+
+The command line wins over the file, and the file wins over the built-in
+default. That is what makes `lock-command` short: tmux takes a single string,
+so a long list of flags is awkward to keep there.
+
+`--size`, `--seconds`, `--frames`, `--verify`, `--dump`, `--at` and `--stats`
+are for measurement and development, and stay on the command line.
+
+An unknown key, a duplicate one, or a value that does not parse stops startup
+with the file and line that caused it. Nothing is ignored: a screensaver runs
+unattended, and a silently dropped `fps = 30` would look like the file having
+no effect at all.
 
 ## Shaders
 
@@ -97,13 +133,20 @@ and termios is put back the way it was.
 | `synthwave`  | A banded sun on the horizon over a neon grid running away.        |
 | `toasters`   | After Dark's flying toasters, with the toast.                     |
 | `aurora`     | Northern lights over a black ridge line.                          |
+| `chladni`    | Chladni figures: sand on a vibrating plate, mode after mode.      |
+| `mode7`      | The SNES Mode 7 floor: a tiled plane rotating away to a horizon.  |
+| `moire`      | Two lattices drifting out of phase; the beat swallows the screen. |
+| `saturn`     | Saturn: banded globe, ringed, with the Cassini division and shadow. |
+| `raindrops`  | Drops running down a dark window, bending the city lights behind. |
+| `apollonian` | An Apollonian gasket, zooming in on a loop with no seam.          |
 | `contour`    | A contour map whose hills drift, cross-hatched like an engraving. |
 | `gradient`   | Not a screensaver: the fixture that proves the conversion works.  |
 
 `--list-shaders` prints the same list, taken from the shaders themselves.
 
 `--shader random` picks one for you at each lock, which is the point of having
-more than one. It never picks `gradient`.
+more than one. It never picks `gradient`, and `random-pool` in the config file
+narrows it further.
 
 ```tmux
 set -g lock-command '~/.local/bin/ghostty-saver --shader random'
@@ -242,6 +285,38 @@ the real wall clock, so a shader that reads it needs `--date 2026-08-28T21:30:00
 (or `--date 77400`, seconds since midnight) before two dumps can be compared.
 The test suite pins it the same way.
 
+To see a whole cycle at once rather than one frame at a time:
+
+```sh
+brew install ffmpeg
+Scripts/contact-sheet.sh --shader hyperspace
+```
+
+That renders the shader at a set of times through the same `--dump --at` path,
+labels each frame with its `iTime`, and tiles them into one PNG under
+`.build/contact/`. Every shader has its own default times - `hyperspace` is
+sampled around its jump, `starwars` along its crawl - and `--times "0 5 12 30"`
+overrides them. `--size`, `--columns` and `--out` do what they say, and
+`--keep` leaves the individual frames next to the sheet. It runs the release
+binary and refuses one older than the sources.
+
+For a shader meant to run under live text as a `custom-shader`, the question
+is whether the text stays readable, and that has a number:
+
+```sh
+Scripts/contrast-check.sh --shader hyperspace --foreground ffffff
+```
+
+That renders the same set of times, computes the WCAG contrast ratio of the
+foreground colour against every pixel, and reports the worst ratio and the
+fraction of each frame below 4.5:1 (`--threshold` changes it). The screensaver
+leaves `iForegroundColor` zero, so the colour has to be given; the default is
+white and `--foreground` can be repeated. For the catalogue this is a reported
+number - nothing is being read over a screensaver, and `hyperspace` whites out
+at its jump by design - and `--gate` turns it into an exit status for a shader
+that has to pass. `Scripts/analyze-contrast.py --self-test` checks the
+arithmetic against WCAG's known pairs.
+
 ## Tests
 
 ```sh
@@ -326,6 +401,12 @@ pinned, and how tmux behaves.
 
 `docs/frame-times.md` is what every shader measures on a 4K screen, and the
 conditions a measurement has to meet to mean anything.
+
+`docs/spec-constants.md` answers whether a shader's tunables can be declared as
+specialization constants and set from the host: they can, but only behind a
+macro this build defines and Ghostty does not, because Ghostty builds a
+custom-shader's fragment function without constant values and Metal aborts on
+one that has them unset.
 
 ## License
 
