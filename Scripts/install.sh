@@ -59,4 +59,13 @@ self-contained copy Scripts/build-shaders.sh writes, not at shaders/:
 Running it inside a tmux pane will not work: tmux swallows the graphics
 protocol escape sequence. lock-command talks to the client tty directly, which
 is why that is the supported way to run it.
+
+Defaults live in ~/.config/ghostty-saver/config, so lock-command can stay a
+single word. It is optional, and it looks like this:
+
+  fps = 30
+  shader = random
+  random-pool = matrix, aurora, tunnel
+
+See the Configuration section of README.md for every key.
 CONFIG
