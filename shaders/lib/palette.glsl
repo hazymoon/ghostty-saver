@@ -31,35 +31,38 @@ const float PALETTE_BLEND = 1800.0;   // seconds of crossfade around a boundary
 // dusk from 17:30, night from 20:00.
 const vec4 PALETTE_STARTS = vec4(18000.0, 28800.0, 63000.0, 72000.0);
 
-// One palette per time of day, in role order.
-const vec3 PALETTE_DAWN[5] = vec3[5](
-    vec3(0.95, 0.58, 0.45),   // sky
-    vec3(0.24, 0.16, 0.22),   // ground
-    vec3(0.30, 0.12, 0.18),   // ink
-    vec3(1.00, 0.92, 0.75),   // highlight
-    vec3(0.98, 0.40, 0.35)    // accent
-);
-const vec3 PALETTE_DAY[5] = vec3[5](
-    vec3(0.42, 0.68, 0.96),
-    vec3(0.34, 0.52, 0.28),
-    vec3(0.10, 0.12, 0.18),
-    vec3(1.00, 1.00, 0.95),
-    vec3(0.98, 0.78, 0.22)
-);
-const vec3 PALETTE_DUSK[5] = vec3[5](
-    vec3(0.62, 0.30, 0.48),
-    vec3(0.18, 0.10, 0.16),
-    vec3(0.12, 0.05, 0.10),
-    vec3(1.00, 0.72, 0.40),
-    vec3(0.95, 0.35, 0.25)
-);
-const vec3 PALETTE_NIGHT[5] = vec3[5](
-    vec3(0.03, 0.04, 0.10),
-    vec3(0.02, 0.02, 0.04),
-    vec3(0.01, 0.01, 0.02),
-    vec3(0.85, 0.90, 1.00),
-    vec3(0.30, 0.45, 0.80)
-);
+// One palette per time of day, in role order. Written as functions rather
+// than const arrays on purpose: spirv-cross drops an unreferenced function
+// from the MSL but keeps a const array, and a lib file is prepended to every
+// shader, so arrays here would land in every shader's generated source.
+vec3 paletteDawn(int role) {
+    if (role == 0) return vec3(0.95, 0.58, 0.45);   // sky
+    if (role == 1) return vec3(0.24, 0.16, 0.22);   // ground
+    if (role == 2) return vec3(0.30, 0.12, 0.18);   // ink
+    if (role == 3) return vec3(1.00, 0.92, 0.75);   // highlight
+    return vec3(0.98, 0.40, 0.35);   // accent
+}
+vec3 paletteDay(int role) {
+    if (role == 0) return vec3(0.42, 0.68, 0.96);
+    if (role == 1) return vec3(0.34, 0.52, 0.28);
+    if (role == 2) return vec3(0.10, 0.12, 0.18);
+    if (role == 3) return vec3(1.00, 1.00, 0.95);
+    return vec3(0.98, 0.78, 0.22);
+}
+vec3 paletteDusk(int role) {
+    if (role == 0) return vec3(0.62, 0.30, 0.48);
+    if (role == 1) return vec3(0.18, 0.10, 0.16);
+    if (role == 2) return vec3(0.12, 0.05, 0.10);
+    if (role == 3) return vec3(1.00, 0.72, 0.40);
+    return vec3(0.95, 0.35, 0.25);
+}
+vec3 paletteNight(int role) {
+    if (role == 0) return vec3(0.03, 0.04, 0.10);
+    if (role == 1) return vec3(0.02, 0.02, 0.04);
+    if (role == 2) return vec3(0.01, 0.01, 0.02);
+    if (role == 3) return vec3(0.85, 0.90, 1.00);
+    return vec3(0.30, 0.45, 0.80);
+}
 
 // The time of day, in seconds since local midnight.
 float dayPhase() {
@@ -67,11 +70,10 @@ float dayPhase() {
 }
 
 vec3 paletteEntry(int which, int role) {
-    if (which == 0) return PALETTE_NIGHT[role];
-    if (which == 1) return PALETTE_DAWN[role];
-    if (which == 2) return PALETTE_DAY[role];
-    if (which == 3) return PALETTE_DUSK[role];
-    return PALETTE_NIGHT[role];
+    if (which == 1) return paletteDawn(role);
+    if (which == 2) return paletteDay(role);
+    if (which == 3) return paletteDusk(role);
+    return paletteNight(role);
 }
 
 // The colour for a role at a given time of day. Palettes are numbered
