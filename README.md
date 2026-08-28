@@ -133,6 +133,11 @@ no effect at all.
 | `synthwave`  | A banded sun on the horizon over a neon grid running away.        |
 | `toasters`   | After Dark's flying toasters, with the toast.                     |
 | `aurora`     | Northern lights over a black ridge line.                          |
+| `chladni`    | Chladni figures: sand on a vibrating plate, mode after mode.      |
+| `mode7`      | The SNES Mode 7 floor: a tiled plane rotating away to a horizon.  |
+| `moire`      | Two lattices drifting out of phase; the beat swallows the screen. |
+| `saturn`     | Saturn: banded globe, ringed, with the Cassini division and shadow. |
+| `raindrops`  | Drops running down a dark window, bending the city lights behind. |
 | `apollonian` | An Apollonian gasket, zooming in on a loop with no seam.          |
 | `gradient`   | Not a screensaver: the fixture that proves the conversion works.  |
 
@@ -267,6 +272,38 @@ the real wall clock, so a shader that reads it needs `--date 2026-08-28T21:30:00
 (or `--date 77400`, seconds since midnight) before two dumps can be compared.
 The test suite pins it the same way.
 
+To see a whole cycle at once rather than one frame at a time:
+
+```sh
+brew install ffmpeg
+Scripts/contact-sheet.sh --shader hyperspace
+```
+
+That renders the shader at a set of times through the same `--dump --at` path,
+labels each frame with its `iTime`, and tiles them into one PNG under
+`.build/contact/`. Every shader has its own default times - `hyperspace` is
+sampled around its jump, `starwars` along its crawl - and `--times "0 5 12 30"`
+overrides them. `--size`, `--columns` and `--out` do what they say, and
+`--keep` leaves the individual frames next to the sheet. It runs the release
+binary and refuses one older than the sources.
+
+For a shader meant to run under live text as a `custom-shader`, the question
+is whether the text stays readable, and that has a number:
+
+```sh
+Scripts/contrast-check.sh --shader hyperspace --foreground ffffff
+```
+
+That renders the same set of times, computes the WCAG contrast ratio of the
+foreground colour against every pixel, and reports the worst ratio and the
+fraction of each frame below 4.5:1 (`--threshold` changes it). The screensaver
+leaves `iForegroundColor` zero, so the colour has to be given; the default is
+white and `--foreground` can be repeated. For the catalogue this is a reported
+number - nothing is being read over a screensaver, and `hyperspace` whites out
+at its jump by design - and `--gate` turns it into an exit status for a shader
+that has to pass. `Scripts/analyze-contrast.py --self-test` checks the
+arithmetic against WCAG's known pairs.
+
 ## Tests
 
 ```sh
@@ -351,6 +388,12 @@ pinned, and how tmux behaves.
 
 `docs/frame-times.md` is what every shader measures on a 4K screen, and the
 conditions a measurement has to meet to mean anything.
+
+`docs/spec-constants.md` answers whether a shader's tunables can be declared as
+specialization constants and set from the host: they can, but only behind a
+macro this build defines and Ghostty does not, because Ghostty builds a
+custom-shader's fragment function without constant values and Metal aborts on
+one that has them unset.
 
 ## License
 
