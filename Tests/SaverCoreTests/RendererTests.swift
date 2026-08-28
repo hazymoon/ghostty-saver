@@ -54,7 +54,7 @@ struct RendererTests {
         var state = try #require(
             ShadertoyState(device: renderer.device, width: renderer.width, height: renderer.height)
         )
-        state.update(time: 0, frame: 0, frameRate: 60)
+        state.update(time: 0, frame: 0, frameRate: 60, date: Date())
 
         let frame = try ShmFrame.create(
             name: makeShmName(pid: getpid(), counter: uniqueCounters(1)[0]),

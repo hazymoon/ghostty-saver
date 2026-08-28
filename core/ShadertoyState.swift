@@ -38,7 +38,11 @@ public struct ShadertoyState {
         uniforms.set(width, height, 1, at: ShadertoyUniformLayout.iResolution)
     }
 
-    public mutating func update(time: Float, frame: Int, frameRate: Float) {
+    /// Writes the per-frame members. The clock is handed in rather than read
+    /// here so that a caller can pin it: `--date` on the command line and the
+    /// test suite both need the same iDate on two renders, which an ambient
+    /// `Date()` cannot give.
+    public mutating func update(time: Float, frame: Int, frameRate: Float, date now: Date) {
         uniforms.set(time, at: ShadertoyUniformLayout.iTime)
         uniforms.set(time - previousTime, at: ShadertoyUniformLayout.iTimeDelta)
         uniforms.set(frameRate, at: ShadertoyUniformLayout.iFrameRate)
@@ -46,7 +50,6 @@ public struct ShadertoyState {
         previousTime = time
 
         // Shadertoy's iDate is (year, month - 1, day, seconds since midnight).
-        let now = Date()
         let calendar = Calendar.current
         let parts = calendar.dateComponents([.year, .month, .day], from: now)
         let midnight = calendar.startOfDay(for: now)
