@@ -10,7 +10,8 @@ Commit messages, comments and docs are in English.
 - Editing `shaders/*.glsl` changes nothing at runtime until
   `Scripts/build-shaders.sh` regenerates the committed `Generated/Shaders.swift`
   (needs `glslang` + `spirv-cross`). Check the diff: tool versions can churn
-  every shader; a one-line fix should show one shader.
+  every shader; a one-line fix should show one shader. CI runs
+  `Scripts/check-shaders-fresh.sh`, which fails on a forgotten regeneration.
 - Terminal-path tests use a pty (`posix_openpt`) and run under `swift test`
   without a tty; `TerminalSession.devicePath(of:)` is the one that opens
   `/dev/tty` and skips itself when there is none.

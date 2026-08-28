@@ -159,7 +159,9 @@ That fetches Ghostty's `shadertoy_prefix.glsl` from a pinned tag, prepends it,
 compiles to SPIR-V with `glslangValidator`, converts to MSL with `spirv-cross`,
 and writes `Generated/Shaders.swift`. The generated file is committed, so a
 build that does not touch a shader needs neither the script, the tools, nor a
-network connection.
+network connection. Its header records a hash of `shaders/`, and
+`Scripts/check-shaders-fresh.sh` - which CI runs - fails when a `.glsl` was
+edited without regenerating.
 
 Using Ghostty's own declarations rather than a transcription is what makes a
 shader here work unchanged as a `custom-shader` over there, and it also means
