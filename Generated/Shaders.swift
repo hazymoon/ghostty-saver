@@ -667,6 +667,116 @@ fragment main0_out main0(constant Globals& _199 [[buffer(1)]], float4 gl_FragCoo
 }
 """#
     )
+    /// Generated from shaders/moire.glsl
+    public static let moire = ShaderProgram(
+        name: "moire",
+        summary: "Two lattices drifting out of phase: the beat between them swallows whatever could be read through it, then lets it back.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float toLine(thread const float& x)
+{
+    float f = fract(x);
+    return fast::min(f, 1.0 - f);
+}
+
+static inline __attribute__((always_inline))
+float lattice(thread const float2& p, thread const float& span)
+{
+    float halfWidth = 0.1500000059604644775390625;
+    float edge = span * 0.699999988079071044921875;
+    float param = p.x;
+    float x = 1.0 - smoothstep(halfWidth - edge, halfWidth + edge, toLine(param));
+    float param_1 = p.y;
+    float y = 1.0 - smoothstep(halfWidth - edge, halfWidth + edge, toLine(param_1));
+    return fast::max(x, y);
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _98)
+{
+    float2 uv = (fragCoord - (float2(_98.iResolution[0], _98.iResolution[1]) * 0.5)) / float2(_98.iResolution[1u]);
+    float pixel = 1.0 / _98.iResolution[1u];
+    float tilt = 0.0599999986588954925537109375 * sin((_98.iTime * 6.28318023681640625) / 47.0);
+    float c = cos(tilt);
+    float s = sin(tilt);
+    float2 turned = float2((c * uv.x) - (s * uv.y), (s * uv.x) + (c * uv.y));
+    float2 slid = turned + float2(_98.iTime * 0.002199999988079071044921875, (_98.iTime * 0.002199999988079071044921875) * 0.37000000476837158203125);
+    float pitchB = 0.03135000169277191162109375;
+    float2 param = uv / float2(0.02999999932944774627685546875);
+    float param_1 = pixel / 0.02999999932944774627685546875;
+    float a = lattice(param, param_1);
+    float2 param_2 = slid / float2(pitchB);
+    float param_3 = pixel / pitchB;
+    float b = lattice(param_2, param_3);
+    float pxA = 0.02999999932944774627685546875 / pixel;
+    float pxB = pitchB / pixel;
+    a = mix(0.5099999904632568359375, a, smoothstep(3.0, 7.5, pxA));
+    b = mix(0.5099999904632568359375, b, smoothstep(3.0, 7.5, pxB));
+    float both = a * b;
+    float either = (a + b) - both;
+    float3 color = float3(0.0199999995529651641845703125, 0.0199999995529651641845703125, 0.0350000001490116119384765625);
+    color += ((float3(0.180000007152557373046875, 0.62000000476837158203125, 0.699999988079071044921875) * a) * 0.20000000298023223876953125);
+    color += ((float3(0.89999997615814208984375, 0.550000011920928955078125, 0.2199999988079071044921875) * b) * 0.20000000298023223876953125);
+    color += ((float3(0.949999988079071044921875, 0.920000016689300537109375, 0.800000011920928955078125) * both) * 0.75);
+    color *= (0.75 + (0.25 * either));
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _98 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _98);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
     /// Generated from shaders/mystify.glsl
     public static let mystify = ShaderProgram(
         name: "mystify",
@@ -1672,5 +1782,5 @@ fragment main0_out main0(constant Globals& _72 [[buffer(1)]], float4 gl_FragCoor
 """#
     )
     /// Every converted shader, for selecting one by name.
-    public static let all: [ShaderProgram] = [aurora, gradient, hyperspace, matrix, mystify, starwars, synthwave, toasters, tunnel]
+    public static let all: [ShaderProgram] = [aurora, gradient, hyperspace, matrix, moire, mystify, starwars, synthwave, toasters, tunnel]
 }
