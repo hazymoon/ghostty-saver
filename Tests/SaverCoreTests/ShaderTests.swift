@@ -221,7 +221,12 @@ struct ShaderInvariantTests {
               let second = try RenderedFrame.make(named: name, width: 256, height: 192, time: 4.25) else {
             return
         }
-        #expect(first.pixels == second.pixels)
+        // Not `first.pixels == second.pixels`: on failure swift-testing
+        // prints both operands, and two 196 KB arrays on one line is more
+        // than the CI log survives - everything after it is lost, including
+        // which shader this was.
+        let differing = first.fractionDiffering(from: second, byMoreThan: 0)
+        #expect(differing == 0, "\(name) drew two different frames for the same time (\(differing) of the pixels differ)")
     }
 
     /// Everything is derived from iTime, so a different iTime has to produce a
