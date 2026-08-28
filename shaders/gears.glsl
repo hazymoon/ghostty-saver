@@ -105,9 +105,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float outer = r + MODULE * 0.9;
         vec2 p = uv - CENTRE[i];
         float dist = length(p);
-        // Cheap bound: nothing of this wheel is drawn beyond its tips.
-        if (dist - outer > pixel * 2.0) continue;
-
         float theta = atan(p.y, p.x) - angle[i];
         float u = fract(theta * TEETH[i] / 6.2831853);
         float root = r - MODULE * 1.0;
@@ -133,6 +130,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             window = smoothstep(-wr, wr, w);
             windowLine = 1.0 - smoothstep(halfWidth, halfWidth + wr, abs(w));
         }
+        // Cheap bound: nothing of this wheel is drawn beyond its tips, so the
+        // hatching is only paid for near one. It comes after the derivatives
+        // on purpose: fwidth() needs every pixel of the quad to reach it,
+        // and one GPU (the CI runner's) draws two different frames for the
+        // same time when the skip sits before it.
+        if (dist - outer > pixel * 2.0) continue;
         float inside = 1.0 - smoothstep(0.0, rate, rim);
 
         // Tone across the face: lit where the rim faces the light, darker
