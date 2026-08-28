@@ -162,7 +162,7 @@ void mainImage(thread float4& fragColor, thread const float2& fragCoord, constan
     float2 uv = (fragCoord - (float2(_39.iResolution[0], _39.iResolution[1]) * 0.5)) / float2(_39.iResolution[1u]);
     float phase = fract(_39.iTime / 24.0);
     float turn = 0.550000011920928955078125 * phase;
-    float2 view = (float2x2(float2(cos(turn), -sin(turn)), float2(sin(turn), cos(turn))) * uv) * exp2(-phase);
+    float2 view = (float2x2(float2(cos(turn), sin(turn)), float2(-sin(turn), cos(turn))) * uv) * exp2(-phase);
     float r = fast::max(length(view), 9.9999999747524270787835121154785e-07);
     float lr = log2(r);
     float octave = floor(lr);

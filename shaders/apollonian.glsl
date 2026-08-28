@@ -45,7 +45,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // undoes exactly, so the loop has no seam.
     float phase = fract(iTime / CYCLE);
     float turn = TWIST * phase;
-    vec2 view = mat2(cos(turn), -sin(turn), sin(turn), cos(turn)) * uv * exp2(-phase);
+    // mat2 is column-major: this is the rotation by +turn, which the
+    // TWIST * octave term below cancels exactly at the end of the cycle.
+    vec2 view = mat2(cos(turn), sin(turn), -sin(turn), cos(turn)) * uv * exp2(-phase);
 
     float r = max(length(view), 1e-6);
     float lr = log2(r);

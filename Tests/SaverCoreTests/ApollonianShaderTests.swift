@@ -18,20 +18,27 @@ struct ApollonianShaderTests {
         #expect(frame.brightness() < 70, "the ground between the circles should be dark")
     }
 
-    /// One cycle zooms in by exactly one generation, so a frame and the frame
-    /// one cycle later are the same picture. That is what makes the loop
-    /// seamless, and it is the property most easily lost by retuning the
-    /// zoom or the twist independently.
-    @Test("a frame one cycle later is the same frame")
+    /// The loop wraps where `fract(iTime / CYCLE)` does, so the only place a
+    /// seam can show is across that wrap. Two frames straddling it should
+    /// differ no more than two frames the same distance apart mid-cycle: the
+    /// picture keeps moving, but it does not jump.
+    @Test("the picture does not jump where the cycle wraps")
     func loopsWithoutASeam() throws {
-        guard let first = try RenderedFrame.make(named: "apollonian", width: 640, height: 360, time: 5.0),
-              let later = try RenderedFrame.make(named: "apollonian", width: 640, height: 360, time: 29.0),
+        let step: Float = 0.005
+        guard let beforeWrap = try RenderedFrame.make(named: "apollonian", width: 640, height: 360, time: 24.0 - step),
+              let afterWrap = try RenderedFrame.make(named: "apollonian", width: 640, height: 360, time: 24.0 + step),
+              let midA = try RenderedFrame.make(named: "apollonian", width: 640, height: 360, time: 12.0 - step),
+              let midB = try RenderedFrame.make(named: "apollonian", width: 640, height: 360, time: 12.0 + step),
               let between = try RenderedFrame.make(named: "apollonian", width: 640, height: 360, time: 17.0) else {
             return
         }
-        let seam = first.fractionDiffering(from: later, byMoreThan: 8)
-        #expect(seam < 0.001, "the loop has a seam (\(seam) of the frame differs a cycle later)")
-        let moved = first.fractionDiffering(from: between, byMoreThan: 8)
-        #expect(moved > 0.05, "half a cycle later the picture should have moved (\(moved))")
+        let acrossWrap = beforeWrap.fractionDiffering(from: afterWrap, byMoreThan: 8)
+        let midCycle = midA.fractionDiffering(from: midB, byMoreThan: 8)
+        #expect(
+            acrossWrap < midCycle * 2 + 0.002,
+            "the loop has a seam (\(acrossWrap) of the frame changes across the wrap, \(midCycle) mid-cycle)"
+        )
+        let moved = beforeWrap.fractionDiffering(from: between, byMoreThan: 8)
+        #expect(moved > 0.05, "half a cycle apart the picture should have moved (\(moved))")
     }
 }
