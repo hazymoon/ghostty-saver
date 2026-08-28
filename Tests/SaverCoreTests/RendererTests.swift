@@ -89,9 +89,11 @@ struct RendererTests {
 
         // Byte order is RGBA, not BGRA: the red ramp must live in byte 0.
         #expect(topRight.0 > topRight.2)
-        // Blue is uniform and alpha is opaque everywhere.
+        // Blue is uniform and alpha is opaque everywhere. The fixture goes
+        // out through the RGB555 dither, so 0.5 lands on level 15 or 16 of
+        // 31 - 124 or 132 - depending on the Bayer threshold at that pixel.
         for corner in [topLeft, topRight, bottomLeft, bottomRight] {
-            #expect(abs(Int(corner.2) - 128) <= 2)
+            #expect(abs(Int(corner.2) - 128) <= 5)
             #expect(corner.3 == 255)
         }
     }
