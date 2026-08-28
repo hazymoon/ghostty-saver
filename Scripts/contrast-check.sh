@@ -123,6 +123,12 @@ for at in "${time_list[@]}"; do
     fi
     # Raw RGB24 out of the PNG, so the analyzer needs no image library.
     ffmpeg -y -loglevel error -i "$work/frame.png" -f rawvideo -pix_fmt rgb24 "$work/frame.rgb"
+    # Into a file rather than a process substitution: `set -e` cannot see the
+    # exit status of `< <(...)`, so an analyzer that died would leave the loop
+    # empty and the gate would pass on zero failures.
+    if ! python3 "$analyzer" "$threshold" "${foregrounds[@]}" < "$work/frame.rgb" > "$work/analysis.tsv"; then
+        exit 1
+    fi
     while IFS=$'\t' read -r colour worst fraction; do
         printf '%s\t%s\t%s\t%s\n' "$at" "$colour" "$worst" "$fraction"
         if [ -z "$worst_overall" ] || [ "$(echo "$worst < $worst_overall" | bc -l)" -eq 1 ]; then
@@ -131,7 +137,7 @@ for at in "${time_list[@]}"; do
         if [ "$(echo "$fraction > $allow" | bc -l)" -eq 1 ]; then
             failed_frames=$(( failed_frames + 1 ))
         fi
-    done < <(python3 "$analyzer" "$threshold" "${foregrounds[@]}" < "$work/frame.rgb")
+    done < "$work/analysis.tsv"
 done
 
 echo
