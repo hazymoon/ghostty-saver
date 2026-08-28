@@ -25,10 +25,6 @@ const vec3 SUN_LOW = vec3(1.00, 0.16, 0.46);
 const vec3 GRID_COLOR = vec3(0.30, 1.00, 0.95);
 const vec3 GROUND = vec3(0.05, 0.01, 0.09);
 
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
 // Distance to the nearest line of a unit lattice, in lattice units.
 float toLine(float x) {
     float f = fract(x);

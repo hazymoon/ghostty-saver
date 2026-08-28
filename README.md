@@ -202,7 +202,9 @@ That fetches Ghostty's `shadertoy_prefix.glsl` from a pinned tag, prepends it,
 compiles to SPIR-V with `glslangValidator`, converts to MSL with `spirv-cross`,
 and writes `Generated/Shaders.swift`. The generated file is committed, so a
 build that does not touch a shader needs neither the script, the tools, nor a
-network connection.
+network connection. Its header records a hash of `shaders/`, and
+`Scripts/check-shaders-fresh.sh` - which CI runs - fails when a `.glsl` was
+edited without regenerating.
 
 Using Ghostty's own declarations rather than a transcription is what makes a
 shader here work unchanged as a `custom-shader` over there, and it also means
@@ -212,6 +214,16 @@ directory and is deleted with it.
 
 Set `GHOSTTY_SAVER_PREFIX_FILE` to a local copy to work offline, or
 `GHOSTTY_SAVER_PREFIX_REF` to move the pin.
+
+Helpers shared between shaders live in `shaders/lib/` - the hash family is
+there - and are prepended to every shader unconditionally. There is nothing to
+declare: what a shader does not call never reaches the MSL, so an unused
+helper costs nothing. The price is that a shader calling into the library is
+no longer a file Ghostty can read on its own, since a `custom-shader` is one
+file and resolves no `#include`. The build therefore also writes a
+self-contained copy of each shader, library included, to
+`.build/custom-shaders/<name>.glsl`, and that is the path a `custom-shader`
+should name. `shaders/<name>.glsl` stays the file to edit.
 
 Shaders must be stateless. Ghostty's custom-shader has no frame-to-frame
 storage, so everything is derived from `iTime` and a hash. `shaders/matrix.glsl`

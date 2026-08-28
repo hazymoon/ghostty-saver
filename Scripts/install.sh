@@ -52,6 +52,10 @@ Add this to ~/.tmux.conf to use it as the lock screen:
 Then reload with: tmux source-file ~/.tmux.conf
 To try it straight away without waiting: tmux lock-client
 
+To use a shader as a Ghostty custom-shader, point the setting at the
+self-contained copy Scripts/build-shaders.sh writes, not at shaders/:
+  custom-shader = $repo_root/.build/custom-shaders/<name>.glsl
+
 Running it inside a tmux pane will not work: tmux swallows the graphics
 protocol escape sequence. lock-command talks to the client tty directly, which
 is why that is the supported way to run it.

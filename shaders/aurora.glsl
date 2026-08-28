@@ -16,14 +16,6 @@ const vec3 AURORA_HIGH = vec3(0.42, 0.30, 0.95);
 const vec3 SKY_TOP = vec3(0.010, 0.014, 0.045);
 const vec3 SKY_LOW = vec3(0.030, 0.055, 0.095);
 
-float hash11(float n) {
-    return fract(sin(n) * 43758.5453123);
-}
-
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
 // Three sines at spreading rates: enough to read as folded cloth, few enough
 // to stay cheap. Each curtain gets its own seed so they do not move together.
 float fold(float x, float seed, float rate) {

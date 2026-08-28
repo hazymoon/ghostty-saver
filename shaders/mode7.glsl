@@ -28,10 +28,6 @@ const vec3 TILE_B = vec3(0.98, 0.78, 0.44);
 const vec3 MOTIF = vec3(0.24, 0.52, 0.30);
 const vec3 MOTIF_DOT = vec3(0.92, 0.94, 0.62);
 
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
 mat2 rotation(float angle) {
     float c = cos(angle);
     float s = sin(angle);

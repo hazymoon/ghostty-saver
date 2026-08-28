@@ -32,14 +32,6 @@ const vec3 LIGHT_A = vec3(1.00, 0.72, 0.30);   // sodium
 const vec3 LIGHT_B = vec3(0.35, 0.65, 1.00);   // neon
 const vec3 LIGHT_C = vec3(0.95, 0.30, 0.55);   // signage
 
-float hash11(float n) {
-    return fract(sin(n) * 43758.5453123);
-}
-
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
 // Out-of-focus city lights. Low frequency and soft, so the displacement inside
 // a drop shows as a shifted, inverted patch of colour rather than as noise.
 vec3 background(vec2 p) {

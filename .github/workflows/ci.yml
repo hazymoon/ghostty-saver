@@ -15,6 +15,17 @@
 #
 # Nothing here compiles a shader. Generated/Shaders.swift is committed and the
 # MSL goes to Metal at runtime, so this needs neither glslang nor spirv-cross.
+#
+# The hole in that is a .glsl edited without Scripts/build-shaders.sh being
+# re-run: the suite reads the committed MSL, agrees with itself, and the pull
+# request is green for a shader that is not in the binary. The check below
+# closes it by comparing a hash of shaders/ with the one build-shaders.sh
+# recorded in the generated header. Re-running the conversion here instead
+# was considered and rejected: the output changes with the glslang and
+# spirv-cross versions, Homebrew cannot pin either, and a pinned toolchain
+# would fail every pull request that touched no shader at all. The hash
+# catches the forgotten regeneration and nothing else, which is what is
+# wanted.
 
 name: ci
 
@@ -43,6 +54,9 @@ jobs:
 
       - name: Record the toolchain
         run: swift --version
+
+      - name: Check Generated/Shaders.swift is up to date
+        run: Scripts/check-shaders-fresh.sh
 
       - name: Build
         run: swift build

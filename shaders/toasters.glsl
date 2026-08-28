@@ -25,10 +25,6 @@ const vec3 TOAST_COLOR = vec3(0.87, 0.68, 0.36);
 const vec3 CRUST_COLOR = vec3(0.52, 0.32, 0.13);
 const vec3 SKY = vec3(0.014, 0.016, 0.030);
 
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
 float sdRoundedBox(vec2 p, vec2 halfSize, float radius) {
     vec2 d = abs(p) - halfSize + radius;
     return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - radius;
