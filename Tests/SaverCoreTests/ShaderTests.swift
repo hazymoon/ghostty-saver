@@ -8,12 +8,19 @@ import Testing
 /// Renders a shader once and hands back the pixels, so tests can describe what
 /// a shader looks like without a terminal.
 struct RenderedFrame {
+    /// The instant every test render is pinned to. iDate is real wall-clock
+    /// time in the screensaver, and two renders milliseconds apart would give a
+    /// shader that reads it two different frames.
+    static let pinnedDate = Date(timeIntervalSince1970: 1_768_478_400)  // 2026-01-15T12:00:00Z
+
     let width: Int
     let height: Int
     let bytesPerRow: Int
     let pixels: [UInt8]
 
-    static func make(program: ShaderProgram, width: Int, height: Int, time: Float) throws -> RenderedFrame? {
+    static func make(
+        program: ShaderProgram, width: Int, height: Int, time: Float, date: Date = pinnedDate
+    ) throws -> RenderedFrame? {
         shmExclusive.lock()
         defer { shmExclusive.unlock() }
 
@@ -29,7 +36,7 @@ struct RenderedFrame {
         var state = try #require(
             ShadertoyState(device: renderer.device, width: renderer.width, height: renderer.height)
         )
-        state.update(time: time, frame: Int(time * 60), frameRate: 60)
+        state.update(time: time, frame: Int(time * 60), frameRate: 60, date: date)
 
         let frame = try ShmFrame.create(
             name: makeShmName(pid: getpid(), counter: uniqueCounters(1)[0]),
@@ -52,12 +59,14 @@ struct RenderedFrame {
     }
 
     /// Renders a named shader, or nothing on a machine with no Metal device.
-    static func make(named name: String, width: Int, height: Int, time: Float) throws -> RenderedFrame? {
+    static func make(
+        named name: String, width: Int, height: Int, time: Float, date: Date = pinnedDate
+    ) throws -> RenderedFrame? {
         let program = try #require(
             GeneratedShaders.all.first { $0.name == name },
             "no shader named \(name) in the catalog"
         )
-        return try make(program: program, width: width, height: height, time: time)
+        return try make(program: program, width: width, height: height, time: time, date: date)
     }
 
     func channelMeans(rows: Range<Int>) -> (red: Double, green: Double, blue: Double) {
