@@ -870,6 +870,247 @@ fragment main0_out main0(constant Globals& _90 [[buffer(1)]], float4 gl_FragCoor
 }
 """#
     )
+    /// Generated from shaders/raindrops.glsl
+    public static let raindrops = ShaderProgram(
+        name: "raindrops",
+        summary: "Drops running down a dark window at night, each one bending the city lights behind it and leaving a beaded trail that thins out behind it.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float hash11(thread const float& n)
+{
+    return fract(sin(n) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+void column(thread const float2& p, thread const float& column_1, thread const float& aspect, thread float& cover, thread float2& shift, thread float& wet, constant Globals& _249)
+{
+    float2 param = float2(column_1, 17.0);
+    float seed = hash21(param);
+    float param_1 = seed * 3.7000000476837158203125;
+    float speed = (0.60000002384185791015625 + (0.89999997615814208984375 * hash11(param_1))) / 9.0;
+    float travelled = (_249.iTime * speed) + (seed * 4.0);
+    float pass = floor(travelled);
+    float along = fract(travelled);
+    float2 param_2 = float2(column_1, pass);
+    float passSeed = hash21(param_2);
+    if (passSeed > 0.7200000286102294921875)
+    {
+        return;
+    }
+    float param_3 = passSeed * 9.1000003814697265625;
+    float size = 0.01200000010430812835693359375 + (0.01600000075995922088623046875 * hash11(param_3));
+    float param_4 = passSeed * 5.30000019073486328125;
+    float lane = ((column_1 + 0.25) + (0.5 * hash11(param_4))) * 0.07500000298023223876953125;
+    float param_5 = passSeed * 2.900000095367431640625;
+    float wobbleRate = 6.0 + (5.0 * hash11(param_5));
+    float wobble = 0.013500000350177288055419921875;
+    float dropX = lane + (wobble * sin((along * wobbleRate) + (passSeed * 6.280000209808349609375)));
+    float dropY = (along * 1.12000000476837158203125) - 0.0599999986588954925537109375;
+    float reach = (wobble + (size * 2.2000000476837158203125)) + 0.006000000052154064178466796875;
+    if (abs(p.x - lane) > reach)
+    {
+        return;
+    }
+    float2 q = p - float2(dropX, dropY);
+    float2 radii = float2(size, size * (1.25 + (0.60000002384185791015625 * smoothstep(-size, size, q.y))));
+    float e = length(q / radii);
+    float d = (e - 1.0) * size;
+    float aa = 1.39999997615814208984375 / _249.iResolution[1u];
+    float drop = 1.0 - smoothstep(-aa, aa, d);
+    if (drop > 0.0)
+    {
+        float2 n = q / radii;
+        float rim = fast::clamp(e, 0.0, 1.0);
+        shift += (((((-n) * size) * 14.0) * (0.3499999940395355224609375 + (rim * rim))) * drop);
+        cover = fast::max(cover, drop);
+    }
+    float alongHere = (p.y + 0.0599999986588954925537109375) / 1.12000000476837158203125;
+    if ((alongHere < along) && (alongHere > 0.0))
+    {
+        float ago = (along - alongHere) / speed;
+        float pathX = lane + (wobble * sin((alongHere * wobbleRate) + (passSeed * 6.280000209808349609375)));
+        float dry = 1.0 - smoothstep(0.0, 6.0, ago);
+        float width = size * (0.3499999940395355224609375 + (0.3499999940395355224609375 * dry));
+        float streak = 1.0 - smoothstep(width - aa, width + aa, abs(p.x - pathX));
+        wet = fast::max(wet, (streak * dry) * 0.550000011920928955078125);
+        float slot = floor(p.y * 34.0);
+        float2 param_6 = float2((column_1 * 3.0) + pass, slot);
+        float beadSeed = hash21(param_6);
+        if (beadSeed < ((0.449999988079071044921875 * dry) + 0.1500000059604644775390625))
+        {
+            float param_7 = beadSeed * 7.69999980926513671875;
+            float2 beadAt = float2(pathX + (((hash11(param_7) - 0.5) * size) * 0.800000011920928955078125), (slot + 0.5) / 34.0);
+            float param_8 = beadSeed * 3.2999999523162841796875;
+            float beadSize = size * (0.2199999988079071044921875 + (0.300000011920928955078125 * hash11(param_8)));
+            float bd = length(p - beadAt) - beadSize;
+            float bead = 1.0 - smoothstep(-aa, aa, bd);
+            if (bead > 0.0)
+            {
+                float2 bn = (p - beadAt) / float2(beadSize);
+                shift += (((((-bn) * beadSize) * 14.0) * 0.5) * bead);
+                cover = fast::max(cover, bead * 0.89999997615814208984375);
+            }
+        }
+    }
+}
+
+static inline __attribute__((always_inline))
+float3 background(thread const float2& p)
+{
+    float3 color = float3(0.01200000010430812835693359375, 0.01400000043213367462158203125, 0.02199999988079071044921875);
+    float2 scale = float2(6.0, 4.0);
+    float2 cell = floor(p * scale);
+    float3 _169;
+    for (int j = -1; j <= 1; j++)
+    {
+        for (int i = -1; i <= 1; i++)
+        {
+            float2 c = cell + float2(float(i), float(j));
+            float2 param = c;
+            float seed = hash21(param);
+            if (seed > 0.4199999868869781494140625)
+            {
+                continue;
+            }
+            float2 param_1 = c + float2(1.2999999523162841796875);
+            float2 param_2 = c + float2(7.900000095367431640625);
+            float2 at = (c + float2(hash21(param_1), hash21(param_2))) / scale;
+            float2 param_3 = c + float2(3.099999904632568359375);
+            float r = 0.04500000178813934326171875 + (0.07999999821186065673828125 * hash21(param_3));
+            float d = length(p - at);
+            float disc = 1.0 - smoothstep(r * 0.75, r * 1.14999997615814208984375, d);
+            if (seed < 0.14000000059604644775390625)
+            {
+                _169 = float3(1.0, 0.7200000286102294921875, 0.300000011920928955078125);
+            }
+            else
+            {
+                _169 = select(float3(0.949999988079071044921875, 0.300000011920928955078125, 0.550000011920928955078125), float3(0.3499999940395355224609375, 0.64999997615814208984375, 1.0), bool3(seed < 0.2800000011920928955078125));
+            }
+            float3 tint = _169;
+            float2 param_4 = c + float2(5.69999980926513671875);
+            color += ((tint * disc) * (0.20000000298023223876953125 + (0.3499999940395355224609375 * hash21(param_4))));
+        }
+    }
+    color += (float3(0.100000001490116119384765625, 0.0719999969005584716796875, 0.02999999932944774627685546875) * smoothstep(0.3499999940395355224609375, 1.0, p.y));
+    return color;
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _249)
+{
+    float2 p = fragCoord / float2(_249.iResolution[1u]);
+    float aspect = _249.iResolution[0u] / _249.iResolution[1u];
+    float cover = 0.0;
+    float2 shift = float2(0.0);
+    float wet = 0.0;
+    float c = floor(p.x / 0.07500000298023223876953125);
+    float2 param = p;
+    float param_1 = c - 1.0;
+    float param_2 = aspect;
+    float param_3 = cover;
+    float2 param_4 = shift;
+    float param_5 = wet;
+    column(param, param_1, param_2, param_3, param_4, param_5, _249);
+    cover = param_3;
+    shift = param_4;
+    wet = param_5;
+    float2 param_6 = p;
+    float param_7 = c;
+    float param_8 = aspect;
+    float param_9 = cover;
+    float2 param_10 = shift;
+    float param_11 = wet;
+    column(param_6, param_7, param_8, param_9, param_10, param_11, _249);
+    cover = param_9;
+    shift = param_10;
+    wet = param_11;
+    float2 param_12 = p;
+    float param_13 = c + 1.0;
+    float param_14 = aspect;
+    float param_15 = cover;
+    float2 param_16 = shift;
+    float param_17 = wet;
+    column(param_12, param_13, param_14, param_15, param_16, param_17, _249);
+    cover = param_15;
+    shift = param_16;
+    wet = param_17;
+    float2 param_18 = float2(p.x / aspect, p.y);
+    float3 color = background(param_18) * 0.550000011920928955078125;
+    if (cover > 0.0)
+    {
+        float2 displaced = p + shift;
+        float2 param_19 = float2(displaced.x / aspect, displaced.y);
+        float3 inside = background(param_19) * 1.35000002384185791015625;
+        float rimLight = fast::clamp(length(shift) * 4.0, 0.0, 1.0);
+        inside += ((float3(0.60000002384185791015625, 0.699999988079071044921875, 0.85000002384185791015625) * rimLight) * 0.3499999940395355224609375);
+        color = mix(color, inside, float3(cover));
+    }
+    color += ((float3(0.300000011920928955078125, 0.3400000035762786865234375, 0.4199999868869781494140625) * wet) * 0.3499999940395355224609375);
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _249 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _249);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
     /// Generated from shaders/starwars.glsl
     public static let starwars = ShaderProgram(
         name: "starwars",
@@ -1672,5 +1913,5 @@ fragment main0_out main0(constant Globals& _72 [[buffer(1)]], float4 gl_FragCoor
 """#
     )
     /// Every converted shader, for selecting one by name.
-    public static let all: [ShaderProgram] = [aurora, gradient, hyperspace, matrix, mystify, starwars, synthwave, toasters, tunnel]
+    public static let all: [ShaderProgram] = [aurora, gradient, hyperspace, matrix, mystify, raindrops, starwars, synthwave, toasters, tunnel]
 }
