@@ -32,9 +32,14 @@ public enum ShaderCatalog {
 
     /// Resolves a shader by name, or the default when no name was given.
     /// Falls back to the first entry if the default is not in the catalog.
+    ///
+    /// `randomPool` narrows what `random` draws from - the config file's
+    /// `random-pool` key. Nil leaves it as the whole catalog minus the
+    /// fixtures.
     public static func select(
         named name: String?,
-        from programs: [ShaderProgram]
+        from programs: [ShaderProgram],
+        randomPool: [ShaderProgram]? = nil
     ) -> ShaderProgram? {
         guard let name else {
             return programs.first { $0.name == defaultName } ?? programs.first
@@ -43,8 +48,32 @@ public enum ShaderCatalog {
             return named
         }
         if name == randomName {
-            return screensavers(in: programs).randomElement()
+            let pool = randomPool.flatMap { $0.isEmpty ? nil : $0 } ?? screensavers(in: programs)
+            return pool.randomElement()
         }
         return nil
+    }
+
+    /// Turns the names a `random-pool` setting lists into programs.
+    ///
+    /// Names that match nothing come back separately rather than being
+    /// dropped: a pool with a typo in it would otherwise quietly become a
+    /// smaller pool.
+    public static func resolvePool(
+        _ names: [String],
+        in programs: [ShaderProgram]
+    ) -> (pool: [ShaderProgram], unknown: [String]) {
+        var pool: [ShaderProgram] = []
+        var unknown: [String] = []
+        for name in names {
+            if let program = programs.first(where: { $0.name == name }) {
+                // A name written twice is one entry, not two chances of being
+                // drawn.
+                if !pool.contains(where: { $0.name == program.name }) { pool.append(program) }
+            } else {
+                unknown.append(name)
+            }
+        }
+        return (pool, unknown)
     }
 }
