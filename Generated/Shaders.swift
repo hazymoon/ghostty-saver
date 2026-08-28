@@ -475,6 +475,1566 @@ fragment main0_out main0(constant Globals& _96 [[buffer(1)]], float4 gl_FragCoor
 }
 """#
     )
+    /// Generated from shaders/march-s128.glsl
+    public static let marchS128 = ShaderProgram(
+        name: "march-s128",
+        summary: "SPIKE, not a screensaver: a sphere-traced distance field, 128 steps (dither 0, far cap 0, bound 0), to measure what marching costs.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float boundEntry(thread const float3& ro, thread const float3& rd)
+{
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - 20.25;
+    float h = (b * b) - c;
+    if (h < 0.0)
+    {
+        return -1.0;
+    }
+    return fast::max(0.0, (-b) - sqrt(h));
+}
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float sdSphere(thread const float3& p, thread const float& r)
+{
+    return length(p) - r;
+}
+
+static inline __attribute__((always_inline))
+float sdTorus(thread const float3& p, thread const float2& t)
+{
+    float2 q = float2(length(p.xz) - t.x, p.y);
+    return length(q) - t.y;
+}
+
+static inline __attribute__((always_inline))
+float sdBox(thread const float3& p, thread const float3& b)
+{
+    float3 q = abs(p) - b;
+    return length(fast::max(q, float3(0.0))) + fast::min(fast::max(q.x, fast::max(q.y, q.z)), 0.0);
+}
+
+static inline __attribute__((always_inline))
+float scene(thread const float3& p)
+{
+    float floorPlane = p.y + 1.0;
+    float3 param = p - float3(1.39999997615814208984375, 0.0, 0.0);
+    float param_1 = 1.0;
+    float sphere = sdSphere(param, param_1);
+    float3 param_2 = p - float3(-1.39999997615814208984375, -0.300000011920928955078125, 0.0);
+    float2 param_3 = float2(1.0, 0.300000011920928955078125);
+    float torus = sdTorus(param_2, param_3);
+    float3 param_4 = p - float3(0.0, 0.20000000298023223876953125, -1.7999999523162841796875);
+    float3 param_5 = float3(0.60000002384185791015625);
+    float box = sdBox(param_4, param_5);
+    return fast::min(fast::min(floorPlane, sphere), fast::min(torus, box));
+}
+
+static inline __attribute__((always_inline))
+float3 normalAt(thread const float3& p)
+{
+    float2 e = float2(0.001000000047497451305389404296875, 0.0);
+    float3 param = p + e.xyy;
+    float3 param_1 = p - e.xyy;
+    float3 param_2 = p + e.yxy;
+    float3 param_3 = p - e.yxy;
+    float3 param_4 = p + e.yyx;
+    float3 param_5 = p - e.yyx;
+    return fast::normalize(float3(scene(param) - scene(param_1), scene(param_2) - scene(param_3), scene(param_4) - scene(param_5)));
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _252)
+{
+    float2 uv = (fragCoord - (float2(_252.iResolution[0], _252.iResolution[1]) * 0.5)) / float2(_252.iResolution[1u]);
+    uv.y = -uv.y;
+    float angle = _252.iTime * 0.300000011920928955078125;
+    float3 ro = float3(7.5 * sin(angle), 2.2000000476837158203125, 7.5 * cos(angle));
+    float3 forward = fast::normalize((-ro) + float3(0.0, -0.20000000298023223876953125, 0.0));
+    float3 right = fast::normalize(cross(forward, float3(0.0, 1.0, 0.0)));
+    float3 up = cross(right, forward);
+    float3 rd = fast::normalize(((forward * 1.60000002384185791015625) + (right * uv.x)) + (up * uv.y));
+    float3 sky = mix(float3(0.07999999821186065673828125, 0.100000001490116119384765625, 0.180000007152557373046875), float3(0.300000011920928955078125, 0.37999999523162841796875, 0.550000011920928955078125), float3(uv.y + 0.5));
+    float3 color = sky;
+    float t = 0.0;
+    bool march = true;
+    if (false)
+    {
+        float3 param = ro;
+        float3 param_1 = rd;
+        float entry = boundEntry(param, param_1);
+        if (entry < 0.0)
+        {
+            march = false;
+        }
+        else
+        {
+            t = entry;
+        }
+    }
+    if (false)
+    {
+        float2 param_2 = fragCoord;
+        t += (hash21(param_2) * 0.100000001490116119384765625);
+    }
+    if (march)
+    {
+        bool hit = false;
+        for (int i = 0; i < 128; i++)
+        {
+            float3 param_3 = ro + (rd * t);
+            float d = scene(param_3);
+            if (d < 0.00200000009499490261077880859375)
+            {
+                hit = true;
+                break;
+            }
+            t += d;
+            if (false && (t > 20.0))
+            {
+                break;
+            }
+        }
+        if (hit)
+        {
+            float3 p = ro + (rd * t);
+            float3 param_4 = p;
+            float3 n = normalAt(param_4);
+            float3 light = float3(0.520265996456146240234375, 0.78039896488189697265625, 0.3468439877033233642578125);
+            float diffuse = fast::max(dot(n, light), 0.0);
+            float3 albedo = select(float3(0.85000002384185791015625, 0.3499999940395355224609375, 0.25), float3(0.550000011920928955078125, 0.5, 0.449999988079071044921875), bool3(p.y < (-0.9900000095367431640625)));
+            color = albedo * (0.1500000059604644775390625 + (0.85000002384185791015625 * diffuse));
+            color = mix(color, sky, float3(1.0 - exp((-t) * 0.07999999821186065673828125)));
+        }
+    }
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _252 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _252);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/march-s16.glsl
+    public static let marchS16 = ShaderProgram(
+        name: "march-s16",
+        summary: "SPIKE, not a screensaver: a sphere-traced distance field, 16 steps (dither 0, far cap 0, bound 0), to measure what marching costs.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float boundEntry(thread const float3& ro, thread const float3& rd)
+{
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - 20.25;
+    float h = (b * b) - c;
+    if (h < 0.0)
+    {
+        return -1.0;
+    }
+    return fast::max(0.0, (-b) - sqrt(h));
+}
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float sdSphere(thread const float3& p, thread const float& r)
+{
+    return length(p) - r;
+}
+
+static inline __attribute__((always_inline))
+float sdTorus(thread const float3& p, thread const float2& t)
+{
+    float2 q = float2(length(p.xz) - t.x, p.y);
+    return length(q) - t.y;
+}
+
+static inline __attribute__((always_inline))
+float sdBox(thread const float3& p, thread const float3& b)
+{
+    float3 q = abs(p) - b;
+    return length(fast::max(q, float3(0.0))) + fast::min(fast::max(q.x, fast::max(q.y, q.z)), 0.0);
+}
+
+static inline __attribute__((always_inline))
+float scene(thread const float3& p)
+{
+    float floorPlane = p.y + 1.0;
+    float3 param = p - float3(1.39999997615814208984375, 0.0, 0.0);
+    float param_1 = 1.0;
+    float sphere = sdSphere(param, param_1);
+    float3 param_2 = p - float3(-1.39999997615814208984375, -0.300000011920928955078125, 0.0);
+    float2 param_3 = float2(1.0, 0.300000011920928955078125);
+    float torus = sdTorus(param_2, param_3);
+    float3 param_4 = p - float3(0.0, 0.20000000298023223876953125, -1.7999999523162841796875);
+    float3 param_5 = float3(0.60000002384185791015625);
+    float box = sdBox(param_4, param_5);
+    return fast::min(fast::min(floorPlane, sphere), fast::min(torus, box));
+}
+
+static inline __attribute__((always_inline))
+float3 normalAt(thread const float3& p)
+{
+    float2 e = float2(0.001000000047497451305389404296875, 0.0);
+    float3 param = p + e.xyy;
+    float3 param_1 = p - e.xyy;
+    float3 param_2 = p + e.yxy;
+    float3 param_3 = p - e.yxy;
+    float3 param_4 = p + e.yyx;
+    float3 param_5 = p - e.yyx;
+    return fast::normalize(float3(scene(param) - scene(param_1), scene(param_2) - scene(param_3), scene(param_4) - scene(param_5)));
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _252)
+{
+    float2 uv = (fragCoord - (float2(_252.iResolution[0], _252.iResolution[1]) * 0.5)) / float2(_252.iResolution[1u]);
+    uv.y = -uv.y;
+    float angle = _252.iTime * 0.300000011920928955078125;
+    float3 ro = float3(7.5 * sin(angle), 2.2000000476837158203125, 7.5 * cos(angle));
+    float3 forward = fast::normalize((-ro) + float3(0.0, -0.20000000298023223876953125, 0.0));
+    float3 right = fast::normalize(cross(forward, float3(0.0, 1.0, 0.0)));
+    float3 up = cross(right, forward);
+    float3 rd = fast::normalize(((forward * 1.60000002384185791015625) + (right * uv.x)) + (up * uv.y));
+    float3 sky = mix(float3(0.07999999821186065673828125, 0.100000001490116119384765625, 0.180000007152557373046875), float3(0.300000011920928955078125, 0.37999999523162841796875, 0.550000011920928955078125), float3(uv.y + 0.5));
+    float3 color = sky;
+    float t = 0.0;
+    bool march = true;
+    if (false)
+    {
+        float3 param = ro;
+        float3 param_1 = rd;
+        float entry = boundEntry(param, param_1);
+        if (entry < 0.0)
+        {
+            march = false;
+        }
+        else
+        {
+            t = entry;
+        }
+    }
+    if (false)
+    {
+        float2 param_2 = fragCoord;
+        t += (hash21(param_2) * 0.100000001490116119384765625);
+    }
+    if (march)
+    {
+        bool hit = false;
+        for (int i = 0; i < 16; i++)
+        {
+            float3 param_3 = ro + (rd * t);
+            float d = scene(param_3);
+            if (d < 0.00200000009499490261077880859375)
+            {
+                hit = true;
+                break;
+            }
+            t += d;
+            if (false && (t > 20.0))
+            {
+                break;
+            }
+        }
+        if (hit)
+        {
+            float3 p = ro + (rd * t);
+            float3 param_4 = p;
+            float3 n = normalAt(param_4);
+            float3 light = float3(0.520265996456146240234375, 0.78039896488189697265625, 0.3468439877033233642578125);
+            float diffuse = fast::max(dot(n, light), 0.0);
+            float3 albedo = select(float3(0.85000002384185791015625, 0.3499999940395355224609375, 0.25), float3(0.550000011920928955078125, 0.5, 0.449999988079071044921875), bool3(p.y < (-0.9900000095367431640625)));
+            color = albedo * (0.1500000059604644775390625 + (0.85000002384185791015625 * diffuse));
+            color = mix(color, sky, float3(1.0 - exp((-t) * 0.07999999821186065673828125)));
+        }
+    }
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _252 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _252);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/march-s32-all.glsl
+    public static let marchS32All = ShaderProgram(
+        name: "march-s32-all",
+        summary: "SPIKE, not a screensaver: a sphere-traced distance field, 32 steps (dither 1, far cap 1, bound 1), to measure what marching costs.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float boundEntry(thread const float3& ro, thread const float3& rd)
+{
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - 20.25;
+    float h = (b * b) - c;
+    if (h < 0.0)
+    {
+        return -1.0;
+    }
+    return fast::max(0.0, (-b) - sqrt(h));
+}
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float sdSphere(thread const float3& p, thread const float& r)
+{
+    return length(p) - r;
+}
+
+static inline __attribute__((always_inline))
+float sdTorus(thread const float3& p, thread const float2& t)
+{
+    float2 q = float2(length(p.xz) - t.x, p.y);
+    return length(q) - t.y;
+}
+
+static inline __attribute__((always_inline))
+float sdBox(thread const float3& p, thread const float3& b)
+{
+    float3 q = abs(p) - b;
+    return length(fast::max(q, float3(0.0))) + fast::min(fast::max(q.x, fast::max(q.y, q.z)), 0.0);
+}
+
+static inline __attribute__((always_inline))
+float scene(thread const float3& p)
+{
+    float floorPlane = p.y + 1.0;
+    float3 param = p - float3(1.39999997615814208984375, 0.0, 0.0);
+    float param_1 = 1.0;
+    float sphere = sdSphere(param, param_1);
+    float3 param_2 = p - float3(-1.39999997615814208984375, -0.300000011920928955078125, 0.0);
+    float2 param_3 = float2(1.0, 0.300000011920928955078125);
+    float torus = sdTorus(param_2, param_3);
+    float3 param_4 = p - float3(0.0, 0.20000000298023223876953125, -1.7999999523162841796875);
+    float3 param_5 = float3(0.60000002384185791015625);
+    float box = sdBox(param_4, param_5);
+    return fast::min(fast::min(floorPlane, sphere), fast::min(torus, box));
+}
+
+static inline __attribute__((always_inline))
+float3 normalAt(thread const float3& p)
+{
+    float2 e = float2(0.001000000047497451305389404296875, 0.0);
+    float3 param = p + e.xyy;
+    float3 param_1 = p - e.xyy;
+    float3 param_2 = p + e.yxy;
+    float3 param_3 = p - e.yxy;
+    float3 param_4 = p + e.yyx;
+    float3 param_5 = p - e.yyx;
+    return fast::normalize(float3(scene(param) - scene(param_1), scene(param_2) - scene(param_3), scene(param_4) - scene(param_5)));
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _252)
+{
+    float2 uv = (fragCoord - (float2(_252.iResolution[0], _252.iResolution[1]) * 0.5)) / float2(_252.iResolution[1u]);
+    uv.y = -uv.y;
+    float angle = _252.iTime * 0.300000011920928955078125;
+    float3 ro = float3(7.5 * sin(angle), 2.2000000476837158203125, 7.5 * cos(angle));
+    float3 forward = fast::normalize((-ro) + float3(0.0, -0.20000000298023223876953125, 0.0));
+    float3 right = fast::normalize(cross(forward, float3(0.0, 1.0, 0.0)));
+    float3 up = cross(right, forward);
+    float3 rd = fast::normalize(((forward * 1.60000002384185791015625) + (right * uv.x)) + (up * uv.y));
+    float3 sky = mix(float3(0.07999999821186065673828125, 0.100000001490116119384765625, 0.180000007152557373046875), float3(0.300000011920928955078125, 0.37999999523162841796875, 0.550000011920928955078125), float3(uv.y + 0.5));
+    float3 color = sky;
+    float t = 0.0;
+    bool march = true;
+    if (true)
+    {
+        float3 param = ro;
+        float3 param_1 = rd;
+        float entry = boundEntry(param, param_1);
+        if (entry < 0.0)
+        {
+            march = false;
+        }
+        else
+        {
+            t = entry;
+        }
+    }
+    if (true)
+    {
+        float2 param_2 = fragCoord;
+        t += (hash21(param_2) * 0.100000001490116119384765625);
+    }
+    if (march)
+    {
+        bool hit = false;
+        for (int i = 0; i < 32; i++)
+        {
+            float3 param_3 = ro + (rd * t);
+            float d = scene(param_3);
+            if (d < 0.00200000009499490261077880859375)
+            {
+                hit = true;
+                break;
+            }
+            t += d;
+            if (true && (t > 20.0))
+            {
+                break;
+            }
+        }
+        if (hit)
+        {
+            float3 p = ro + (rd * t);
+            float3 param_4 = p;
+            float3 n = normalAt(param_4);
+            float3 light = float3(0.520265996456146240234375, 0.78039896488189697265625, 0.3468439877033233642578125);
+            float diffuse = fast::max(dot(n, light), 0.0);
+            float3 albedo = select(float3(0.85000002384185791015625, 0.3499999940395355224609375, 0.25), float3(0.550000011920928955078125, 0.5, 0.449999988079071044921875), bool3(p.y < (-0.9900000095367431640625)));
+            color = albedo * (0.1500000059604644775390625 + (0.85000002384185791015625 * diffuse));
+            color = mix(color, sky, float3(1.0 - exp((-t) * 0.07999999821186065673828125)));
+        }
+    }
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _252 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _252);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/march-s32-bound.glsl
+    public static let marchS32Bound = ShaderProgram(
+        name: "march-s32-bound",
+        summary: "SPIKE, not a screensaver: a sphere-traced distance field, 32 steps (dither 0, far cap 0, bound 1), to measure what marching costs.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float boundEntry(thread const float3& ro, thread const float3& rd)
+{
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - 20.25;
+    float h = (b * b) - c;
+    if (h < 0.0)
+    {
+        return -1.0;
+    }
+    return fast::max(0.0, (-b) - sqrt(h));
+}
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float sdSphere(thread const float3& p, thread const float& r)
+{
+    return length(p) - r;
+}
+
+static inline __attribute__((always_inline))
+float sdTorus(thread const float3& p, thread const float2& t)
+{
+    float2 q = float2(length(p.xz) - t.x, p.y);
+    return length(q) - t.y;
+}
+
+static inline __attribute__((always_inline))
+float sdBox(thread const float3& p, thread const float3& b)
+{
+    float3 q = abs(p) - b;
+    return length(fast::max(q, float3(0.0))) + fast::min(fast::max(q.x, fast::max(q.y, q.z)), 0.0);
+}
+
+static inline __attribute__((always_inline))
+float scene(thread const float3& p)
+{
+    float floorPlane = p.y + 1.0;
+    float3 param = p - float3(1.39999997615814208984375, 0.0, 0.0);
+    float param_1 = 1.0;
+    float sphere = sdSphere(param, param_1);
+    float3 param_2 = p - float3(-1.39999997615814208984375, -0.300000011920928955078125, 0.0);
+    float2 param_3 = float2(1.0, 0.300000011920928955078125);
+    float torus = sdTorus(param_2, param_3);
+    float3 param_4 = p - float3(0.0, 0.20000000298023223876953125, -1.7999999523162841796875);
+    float3 param_5 = float3(0.60000002384185791015625);
+    float box = sdBox(param_4, param_5);
+    return fast::min(fast::min(floorPlane, sphere), fast::min(torus, box));
+}
+
+static inline __attribute__((always_inline))
+float3 normalAt(thread const float3& p)
+{
+    float2 e = float2(0.001000000047497451305389404296875, 0.0);
+    float3 param = p + e.xyy;
+    float3 param_1 = p - e.xyy;
+    float3 param_2 = p + e.yxy;
+    float3 param_3 = p - e.yxy;
+    float3 param_4 = p + e.yyx;
+    float3 param_5 = p - e.yyx;
+    return fast::normalize(float3(scene(param) - scene(param_1), scene(param_2) - scene(param_3), scene(param_4) - scene(param_5)));
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _252)
+{
+    float2 uv = (fragCoord - (float2(_252.iResolution[0], _252.iResolution[1]) * 0.5)) / float2(_252.iResolution[1u]);
+    uv.y = -uv.y;
+    float angle = _252.iTime * 0.300000011920928955078125;
+    float3 ro = float3(7.5 * sin(angle), 2.2000000476837158203125, 7.5 * cos(angle));
+    float3 forward = fast::normalize((-ro) + float3(0.0, -0.20000000298023223876953125, 0.0));
+    float3 right = fast::normalize(cross(forward, float3(0.0, 1.0, 0.0)));
+    float3 up = cross(right, forward);
+    float3 rd = fast::normalize(((forward * 1.60000002384185791015625) + (right * uv.x)) + (up * uv.y));
+    float3 sky = mix(float3(0.07999999821186065673828125, 0.100000001490116119384765625, 0.180000007152557373046875), float3(0.300000011920928955078125, 0.37999999523162841796875, 0.550000011920928955078125), float3(uv.y + 0.5));
+    float3 color = sky;
+    float t = 0.0;
+    bool march = true;
+    if (true)
+    {
+        float3 param = ro;
+        float3 param_1 = rd;
+        float entry = boundEntry(param, param_1);
+        if (entry < 0.0)
+        {
+            march = false;
+        }
+        else
+        {
+            t = entry;
+        }
+    }
+    if (false)
+    {
+        float2 param_2 = fragCoord;
+        t += (hash21(param_2) * 0.100000001490116119384765625);
+    }
+    if (march)
+    {
+        bool hit = false;
+        for (int i = 0; i < 32; i++)
+        {
+            float3 param_3 = ro + (rd * t);
+            float d = scene(param_3);
+            if (d < 0.00200000009499490261077880859375)
+            {
+                hit = true;
+                break;
+            }
+            t += d;
+            if (false && (t > 20.0))
+            {
+                break;
+            }
+        }
+        if (hit)
+        {
+            float3 p = ro + (rd * t);
+            float3 param_4 = p;
+            float3 n = normalAt(param_4);
+            float3 light = float3(0.520265996456146240234375, 0.78039896488189697265625, 0.3468439877033233642578125);
+            float diffuse = fast::max(dot(n, light), 0.0);
+            float3 albedo = select(float3(0.85000002384185791015625, 0.3499999940395355224609375, 0.25), float3(0.550000011920928955078125, 0.5, 0.449999988079071044921875), bool3(p.y < (-0.9900000095367431640625)));
+            color = albedo * (0.1500000059604644775390625 + (0.85000002384185791015625 * diffuse));
+            color = mix(color, sky, float3(1.0 - exp((-t) * 0.07999999821186065673828125)));
+        }
+    }
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _252 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _252);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/march-s32-cap.glsl
+    public static let marchS32Cap = ShaderProgram(
+        name: "march-s32-cap",
+        summary: "SPIKE, not a screensaver: a sphere-traced distance field, 32 steps (dither 0, far cap 1, bound 0), to measure what marching costs.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float boundEntry(thread const float3& ro, thread const float3& rd)
+{
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - 20.25;
+    float h = (b * b) - c;
+    if (h < 0.0)
+    {
+        return -1.0;
+    }
+    return fast::max(0.0, (-b) - sqrt(h));
+}
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float sdSphere(thread const float3& p, thread const float& r)
+{
+    return length(p) - r;
+}
+
+static inline __attribute__((always_inline))
+float sdTorus(thread const float3& p, thread const float2& t)
+{
+    float2 q = float2(length(p.xz) - t.x, p.y);
+    return length(q) - t.y;
+}
+
+static inline __attribute__((always_inline))
+float sdBox(thread const float3& p, thread const float3& b)
+{
+    float3 q = abs(p) - b;
+    return length(fast::max(q, float3(0.0))) + fast::min(fast::max(q.x, fast::max(q.y, q.z)), 0.0);
+}
+
+static inline __attribute__((always_inline))
+float scene(thread const float3& p)
+{
+    float floorPlane = p.y + 1.0;
+    float3 param = p - float3(1.39999997615814208984375, 0.0, 0.0);
+    float param_1 = 1.0;
+    float sphere = sdSphere(param, param_1);
+    float3 param_2 = p - float3(-1.39999997615814208984375, -0.300000011920928955078125, 0.0);
+    float2 param_3 = float2(1.0, 0.300000011920928955078125);
+    float torus = sdTorus(param_2, param_3);
+    float3 param_4 = p - float3(0.0, 0.20000000298023223876953125, -1.7999999523162841796875);
+    float3 param_5 = float3(0.60000002384185791015625);
+    float box = sdBox(param_4, param_5);
+    return fast::min(fast::min(floorPlane, sphere), fast::min(torus, box));
+}
+
+static inline __attribute__((always_inline))
+float3 normalAt(thread const float3& p)
+{
+    float2 e = float2(0.001000000047497451305389404296875, 0.0);
+    float3 param = p + e.xyy;
+    float3 param_1 = p - e.xyy;
+    float3 param_2 = p + e.yxy;
+    float3 param_3 = p - e.yxy;
+    float3 param_4 = p + e.yyx;
+    float3 param_5 = p - e.yyx;
+    return fast::normalize(float3(scene(param) - scene(param_1), scene(param_2) - scene(param_3), scene(param_4) - scene(param_5)));
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _252)
+{
+    float2 uv = (fragCoord - (float2(_252.iResolution[0], _252.iResolution[1]) * 0.5)) / float2(_252.iResolution[1u]);
+    uv.y = -uv.y;
+    float angle = _252.iTime * 0.300000011920928955078125;
+    float3 ro = float3(7.5 * sin(angle), 2.2000000476837158203125, 7.5 * cos(angle));
+    float3 forward = fast::normalize((-ro) + float3(0.0, -0.20000000298023223876953125, 0.0));
+    float3 right = fast::normalize(cross(forward, float3(0.0, 1.0, 0.0)));
+    float3 up = cross(right, forward);
+    float3 rd = fast::normalize(((forward * 1.60000002384185791015625) + (right * uv.x)) + (up * uv.y));
+    float3 sky = mix(float3(0.07999999821186065673828125, 0.100000001490116119384765625, 0.180000007152557373046875), float3(0.300000011920928955078125, 0.37999999523162841796875, 0.550000011920928955078125), float3(uv.y + 0.5));
+    float3 color = sky;
+    float t = 0.0;
+    bool march = true;
+    if (false)
+    {
+        float3 param = ro;
+        float3 param_1 = rd;
+        float entry = boundEntry(param, param_1);
+        if (entry < 0.0)
+        {
+            march = false;
+        }
+        else
+        {
+            t = entry;
+        }
+    }
+    if (false)
+    {
+        float2 param_2 = fragCoord;
+        t += (hash21(param_2) * 0.100000001490116119384765625);
+    }
+    if (march)
+    {
+        bool hit = false;
+        for (int i = 0; i < 32; i++)
+        {
+            float3 param_3 = ro + (rd * t);
+            float d = scene(param_3);
+            if (d < 0.00200000009499490261077880859375)
+            {
+                hit = true;
+                break;
+            }
+            t += d;
+            if (true && (t > 20.0))
+            {
+                break;
+            }
+        }
+        if (hit)
+        {
+            float3 p = ro + (rd * t);
+            float3 param_4 = p;
+            float3 n = normalAt(param_4);
+            float3 light = float3(0.520265996456146240234375, 0.78039896488189697265625, 0.3468439877033233642578125);
+            float diffuse = fast::max(dot(n, light), 0.0);
+            float3 albedo = select(float3(0.85000002384185791015625, 0.3499999940395355224609375, 0.25), float3(0.550000011920928955078125, 0.5, 0.449999988079071044921875), bool3(p.y < (-0.9900000095367431640625)));
+            color = albedo * (0.1500000059604644775390625 + (0.85000002384185791015625 * diffuse));
+            color = mix(color, sky, float3(1.0 - exp((-t) * 0.07999999821186065673828125)));
+        }
+    }
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _252 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _252);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/march-s32-dither.glsl
+    public static let marchS32Dither = ShaderProgram(
+        name: "march-s32-dither",
+        summary: "SPIKE, not a screensaver: a sphere-traced distance field, 32 steps (dither 1, far cap 0, bound 0), to measure what marching costs.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float boundEntry(thread const float3& ro, thread const float3& rd)
+{
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - 20.25;
+    float h = (b * b) - c;
+    if (h < 0.0)
+    {
+        return -1.0;
+    }
+    return fast::max(0.0, (-b) - sqrt(h));
+}
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float sdSphere(thread const float3& p, thread const float& r)
+{
+    return length(p) - r;
+}
+
+static inline __attribute__((always_inline))
+float sdTorus(thread const float3& p, thread const float2& t)
+{
+    float2 q = float2(length(p.xz) - t.x, p.y);
+    return length(q) - t.y;
+}
+
+static inline __attribute__((always_inline))
+float sdBox(thread const float3& p, thread const float3& b)
+{
+    float3 q = abs(p) - b;
+    return length(fast::max(q, float3(0.0))) + fast::min(fast::max(q.x, fast::max(q.y, q.z)), 0.0);
+}
+
+static inline __attribute__((always_inline))
+float scene(thread const float3& p)
+{
+    float floorPlane = p.y + 1.0;
+    float3 param = p - float3(1.39999997615814208984375, 0.0, 0.0);
+    float param_1 = 1.0;
+    float sphere = sdSphere(param, param_1);
+    float3 param_2 = p - float3(-1.39999997615814208984375, -0.300000011920928955078125, 0.0);
+    float2 param_3 = float2(1.0, 0.300000011920928955078125);
+    float torus = sdTorus(param_2, param_3);
+    float3 param_4 = p - float3(0.0, 0.20000000298023223876953125, -1.7999999523162841796875);
+    float3 param_5 = float3(0.60000002384185791015625);
+    float box = sdBox(param_4, param_5);
+    return fast::min(fast::min(floorPlane, sphere), fast::min(torus, box));
+}
+
+static inline __attribute__((always_inline))
+float3 normalAt(thread const float3& p)
+{
+    float2 e = float2(0.001000000047497451305389404296875, 0.0);
+    float3 param = p + e.xyy;
+    float3 param_1 = p - e.xyy;
+    float3 param_2 = p + e.yxy;
+    float3 param_3 = p - e.yxy;
+    float3 param_4 = p + e.yyx;
+    float3 param_5 = p - e.yyx;
+    return fast::normalize(float3(scene(param) - scene(param_1), scene(param_2) - scene(param_3), scene(param_4) - scene(param_5)));
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _252)
+{
+    float2 uv = (fragCoord - (float2(_252.iResolution[0], _252.iResolution[1]) * 0.5)) / float2(_252.iResolution[1u]);
+    uv.y = -uv.y;
+    float angle = _252.iTime * 0.300000011920928955078125;
+    float3 ro = float3(7.5 * sin(angle), 2.2000000476837158203125, 7.5 * cos(angle));
+    float3 forward = fast::normalize((-ro) + float3(0.0, -0.20000000298023223876953125, 0.0));
+    float3 right = fast::normalize(cross(forward, float3(0.0, 1.0, 0.0)));
+    float3 up = cross(right, forward);
+    float3 rd = fast::normalize(((forward * 1.60000002384185791015625) + (right * uv.x)) + (up * uv.y));
+    float3 sky = mix(float3(0.07999999821186065673828125, 0.100000001490116119384765625, 0.180000007152557373046875), float3(0.300000011920928955078125, 0.37999999523162841796875, 0.550000011920928955078125), float3(uv.y + 0.5));
+    float3 color = sky;
+    float t = 0.0;
+    bool march = true;
+    if (false)
+    {
+        float3 param = ro;
+        float3 param_1 = rd;
+        float entry = boundEntry(param, param_1);
+        if (entry < 0.0)
+        {
+            march = false;
+        }
+        else
+        {
+            t = entry;
+        }
+    }
+    if (true)
+    {
+        float2 param_2 = fragCoord;
+        t += (hash21(param_2) * 0.100000001490116119384765625);
+    }
+    if (march)
+    {
+        bool hit = false;
+        for (int i = 0; i < 32; i++)
+        {
+            float3 param_3 = ro + (rd * t);
+            float d = scene(param_3);
+            if (d < 0.00200000009499490261077880859375)
+            {
+                hit = true;
+                break;
+            }
+            t += d;
+            if (false && (t > 20.0))
+            {
+                break;
+            }
+        }
+        if (hit)
+        {
+            float3 p = ro + (rd * t);
+            float3 param_4 = p;
+            float3 n = normalAt(param_4);
+            float3 light = float3(0.520265996456146240234375, 0.78039896488189697265625, 0.3468439877033233642578125);
+            float diffuse = fast::max(dot(n, light), 0.0);
+            float3 albedo = select(float3(0.85000002384185791015625, 0.3499999940395355224609375, 0.25), float3(0.550000011920928955078125, 0.5, 0.449999988079071044921875), bool3(p.y < (-0.9900000095367431640625)));
+            color = albedo * (0.1500000059604644775390625 + (0.85000002384185791015625 * diffuse));
+            color = mix(color, sky, float3(1.0 - exp((-t) * 0.07999999821186065673828125)));
+        }
+    }
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _252 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _252);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/march-s32.glsl
+    public static let marchS32 = ShaderProgram(
+        name: "march-s32",
+        summary: "SPIKE, not a screensaver: a sphere-traced distance field, 32 steps (dither 0, far cap 0, bound 0), to measure what marching costs.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float boundEntry(thread const float3& ro, thread const float3& rd)
+{
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - 20.25;
+    float h = (b * b) - c;
+    if (h < 0.0)
+    {
+        return -1.0;
+    }
+    return fast::max(0.0, (-b) - sqrt(h));
+}
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float sdSphere(thread const float3& p, thread const float& r)
+{
+    return length(p) - r;
+}
+
+static inline __attribute__((always_inline))
+float sdTorus(thread const float3& p, thread const float2& t)
+{
+    float2 q = float2(length(p.xz) - t.x, p.y);
+    return length(q) - t.y;
+}
+
+static inline __attribute__((always_inline))
+float sdBox(thread const float3& p, thread const float3& b)
+{
+    float3 q = abs(p) - b;
+    return length(fast::max(q, float3(0.0))) + fast::min(fast::max(q.x, fast::max(q.y, q.z)), 0.0);
+}
+
+static inline __attribute__((always_inline))
+float scene(thread const float3& p)
+{
+    float floorPlane = p.y + 1.0;
+    float3 param = p - float3(1.39999997615814208984375, 0.0, 0.0);
+    float param_1 = 1.0;
+    float sphere = sdSphere(param, param_1);
+    float3 param_2 = p - float3(-1.39999997615814208984375, -0.300000011920928955078125, 0.0);
+    float2 param_3 = float2(1.0, 0.300000011920928955078125);
+    float torus = sdTorus(param_2, param_3);
+    float3 param_4 = p - float3(0.0, 0.20000000298023223876953125, -1.7999999523162841796875);
+    float3 param_5 = float3(0.60000002384185791015625);
+    float box = sdBox(param_4, param_5);
+    return fast::min(fast::min(floorPlane, sphere), fast::min(torus, box));
+}
+
+static inline __attribute__((always_inline))
+float3 normalAt(thread const float3& p)
+{
+    float2 e = float2(0.001000000047497451305389404296875, 0.0);
+    float3 param = p + e.xyy;
+    float3 param_1 = p - e.xyy;
+    float3 param_2 = p + e.yxy;
+    float3 param_3 = p - e.yxy;
+    float3 param_4 = p + e.yyx;
+    float3 param_5 = p - e.yyx;
+    return fast::normalize(float3(scene(param) - scene(param_1), scene(param_2) - scene(param_3), scene(param_4) - scene(param_5)));
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _252)
+{
+    float2 uv = (fragCoord - (float2(_252.iResolution[0], _252.iResolution[1]) * 0.5)) / float2(_252.iResolution[1u]);
+    uv.y = -uv.y;
+    float angle = _252.iTime * 0.300000011920928955078125;
+    float3 ro = float3(7.5 * sin(angle), 2.2000000476837158203125, 7.5 * cos(angle));
+    float3 forward = fast::normalize((-ro) + float3(0.0, -0.20000000298023223876953125, 0.0));
+    float3 right = fast::normalize(cross(forward, float3(0.0, 1.0, 0.0)));
+    float3 up = cross(right, forward);
+    float3 rd = fast::normalize(((forward * 1.60000002384185791015625) + (right * uv.x)) + (up * uv.y));
+    float3 sky = mix(float3(0.07999999821186065673828125, 0.100000001490116119384765625, 0.180000007152557373046875), float3(0.300000011920928955078125, 0.37999999523162841796875, 0.550000011920928955078125), float3(uv.y + 0.5));
+    float3 color = sky;
+    float t = 0.0;
+    bool march = true;
+    if (false)
+    {
+        float3 param = ro;
+        float3 param_1 = rd;
+        float entry = boundEntry(param, param_1);
+        if (entry < 0.0)
+        {
+            march = false;
+        }
+        else
+        {
+            t = entry;
+        }
+    }
+    if (false)
+    {
+        float2 param_2 = fragCoord;
+        t += (hash21(param_2) * 0.100000001490116119384765625);
+    }
+    if (march)
+    {
+        bool hit = false;
+        for (int i = 0; i < 32; i++)
+        {
+            float3 param_3 = ro + (rd * t);
+            float d = scene(param_3);
+            if (d < 0.00200000009499490261077880859375)
+            {
+                hit = true;
+                break;
+            }
+            t += d;
+            if (false && (t > 20.0))
+            {
+                break;
+            }
+        }
+        if (hit)
+        {
+            float3 p = ro + (rd * t);
+            float3 param_4 = p;
+            float3 n = normalAt(param_4);
+            float3 light = float3(0.520265996456146240234375, 0.78039896488189697265625, 0.3468439877033233642578125);
+            float diffuse = fast::max(dot(n, light), 0.0);
+            float3 albedo = select(float3(0.85000002384185791015625, 0.3499999940395355224609375, 0.25), float3(0.550000011920928955078125, 0.5, 0.449999988079071044921875), bool3(p.y < (-0.9900000095367431640625)));
+            color = albedo * (0.1500000059604644775390625 + (0.85000002384185791015625 * diffuse));
+            color = mix(color, sky, float3(1.0 - exp((-t) * 0.07999999821186065673828125)));
+        }
+    }
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _252 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _252);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
+    /// Generated from shaders/march-s64.glsl
+    public static let marchS64 = ShaderProgram(
+        name: "march-s64",
+        summary: "SPIKE, not a screensaver: a sphere-traced distance field, 64 steps (dither 0, far cap 0, bound 0), to measure what marching costs.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+float boundEntry(thread const float3& ro, thread const float3& rd)
+{
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - 20.25;
+    float h = (b * b) - c;
+    if (h < 0.0)
+    {
+        return -1.0;
+    }
+    return fast::max(0.0, (-b) - sqrt(h));
+}
+
+static inline __attribute__((always_inline))
+float hash21(thread const float2& p)
+{
+    return fract(sin(dot(p, float2(127.09999847412109375, 311.70001220703125))) * 43758.546875);
+}
+
+static inline __attribute__((always_inline))
+float sdSphere(thread const float3& p, thread const float& r)
+{
+    return length(p) - r;
+}
+
+static inline __attribute__((always_inline))
+float sdTorus(thread const float3& p, thread const float2& t)
+{
+    float2 q = float2(length(p.xz) - t.x, p.y);
+    return length(q) - t.y;
+}
+
+static inline __attribute__((always_inline))
+float sdBox(thread const float3& p, thread const float3& b)
+{
+    float3 q = abs(p) - b;
+    return length(fast::max(q, float3(0.0))) + fast::min(fast::max(q.x, fast::max(q.y, q.z)), 0.0);
+}
+
+static inline __attribute__((always_inline))
+float scene(thread const float3& p)
+{
+    float floorPlane = p.y + 1.0;
+    float3 param = p - float3(1.39999997615814208984375, 0.0, 0.0);
+    float param_1 = 1.0;
+    float sphere = sdSphere(param, param_1);
+    float3 param_2 = p - float3(-1.39999997615814208984375, -0.300000011920928955078125, 0.0);
+    float2 param_3 = float2(1.0, 0.300000011920928955078125);
+    float torus = sdTorus(param_2, param_3);
+    float3 param_4 = p - float3(0.0, 0.20000000298023223876953125, -1.7999999523162841796875);
+    float3 param_5 = float3(0.60000002384185791015625);
+    float box = sdBox(param_4, param_5);
+    return fast::min(fast::min(floorPlane, sphere), fast::min(torus, box));
+}
+
+static inline __attribute__((always_inline))
+float3 normalAt(thread const float3& p)
+{
+    float2 e = float2(0.001000000047497451305389404296875, 0.0);
+    float3 param = p + e.xyy;
+    float3 param_1 = p - e.xyy;
+    float3 param_2 = p + e.yxy;
+    float3 param_3 = p - e.yxy;
+    float3 param_4 = p + e.yyx;
+    float3 param_5 = p - e.yyx;
+    return fast::normalize(float3(scene(param) - scene(param_1), scene(param_2) - scene(param_3), scene(param_4) - scene(param_5)));
+}
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _252)
+{
+    float2 uv = (fragCoord - (float2(_252.iResolution[0], _252.iResolution[1]) * 0.5)) / float2(_252.iResolution[1u]);
+    uv.y = -uv.y;
+    float angle = _252.iTime * 0.300000011920928955078125;
+    float3 ro = float3(7.5 * sin(angle), 2.2000000476837158203125, 7.5 * cos(angle));
+    float3 forward = fast::normalize((-ro) + float3(0.0, -0.20000000298023223876953125, 0.0));
+    float3 right = fast::normalize(cross(forward, float3(0.0, 1.0, 0.0)));
+    float3 up = cross(right, forward);
+    float3 rd = fast::normalize(((forward * 1.60000002384185791015625) + (right * uv.x)) + (up * uv.y));
+    float3 sky = mix(float3(0.07999999821186065673828125, 0.100000001490116119384765625, 0.180000007152557373046875), float3(0.300000011920928955078125, 0.37999999523162841796875, 0.550000011920928955078125), float3(uv.y + 0.5));
+    float3 color = sky;
+    float t = 0.0;
+    bool march = true;
+    if (false)
+    {
+        float3 param = ro;
+        float3 param_1 = rd;
+        float entry = boundEntry(param, param_1);
+        if (entry < 0.0)
+        {
+            march = false;
+        }
+        else
+        {
+            t = entry;
+        }
+    }
+    if (false)
+    {
+        float2 param_2 = fragCoord;
+        t += (hash21(param_2) * 0.100000001490116119384765625);
+    }
+    if (march)
+    {
+        bool hit = false;
+        for (int i = 0; i < 64; i++)
+        {
+            float3 param_3 = ro + (rd * t);
+            float d = scene(param_3);
+            if (d < 0.00200000009499490261077880859375)
+            {
+                hit = true;
+                break;
+            }
+            t += d;
+            if (false && (t > 20.0))
+            {
+                break;
+            }
+        }
+        if (hit)
+        {
+            float3 p = ro + (rd * t);
+            float3 param_4 = p;
+            float3 n = normalAt(param_4);
+            float3 light = float3(0.520265996456146240234375, 0.78039896488189697265625, 0.3468439877033233642578125);
+            float diffuse = fast::max(dot(n, light), 0.0);
+            float3 albedo = select(float3(0.85000002384185791015625, 0.3499999940395355224609375, 0.25), float3(0.550000011920928955078125, 0.5, 0.449999988079071044921875), bool3(p.y < (-0.9900000095367431640625)));
+            color = albedo * (0.1500000059604644775390625 + (0.85000002384185791015625 * diffuse));
+            color = mix(color, sky, float3(1.0 - exp((-t) * 0.07999999821186065673828125)));
+        }
+    }
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _252 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _252);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
     /// Generated from shaders/matrix.glsl
     public static let matrix = ShaderProgram(
         name: "matrix",
@@ -1672,5 +3232,5 @@ fragment main0_out main0(constant Globals& _72 [[buffer(1)]], float4 gl_FragCoor
 """#
     )
     /// Every converted shader, for selecting one by name.
-    public static let all: [ShaderProgram] = [aurora, gradient, hyperspace, matrix, mystify, starwars, synthwave, toasters, tunnel]
+    public static let all: [ShaderProgram] = [aurora, gradient, hyperspace, marchS128, marchS16, marchS32All, marchS32Bound, marchS32Cap, marchS32Dither, marchS32, marchS64, matrix, mystify, starwars, synthwave, toasters, tunnel]
 }
