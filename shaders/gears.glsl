@@ -64,12 +64,15 @@ float toothProfile(float u) {
 // the line of centres. See the derivation in the leading comment: with the
 // driver's tooth phase f_i along the bearing alpha, the driven wheel's tooth
 // phase along alpha + pi has to be 1/2 - f_i, and this solves for the angle
-// that puts it there. The answer is only defined up to one tooth, which is
-// all the drawing can see.
+// that puts it there. Meshing only needs the answer up to one tooth, but
+// the phase is kept unwrapped: the relation is linear in the driver's angle,
+// and wrapping it would jump the driven wheel by a tooth whenever the
+// driver's tooth phase rolls over - the teeth would not show it, the
+// windows would.
 float phaseFor(int driven, int driver, float driverAngle) {
     vec2 toDriven = CENTRE[driven] - CENTRE[driver];
     float alpha = atan(toDriven.y, toDriven.x);
-    float fi = fract((alpha - driverAngle) * TEETH[driver] / 6.2831853);
+    float fi = (alpha - driverAngle) * TEETH[driver] / 6.2831853;
     float fj = 0.5 - fi;
     return alpha + 3.14159265 - fj * 6.2831853 / TEETH[driven];
 }

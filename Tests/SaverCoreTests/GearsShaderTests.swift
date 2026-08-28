@@ -32,4 +32,35 @@ struct GearsShaderTests {
         let moved = before.fractionDiffering(from: after, byMoreThan: 40)
         #expect(moved > 0.005, "the wheels are not turning (\(moved) of the frame moved)")
     }
+
+    /// The driven wheels' angles are derived from their driver's, and a
+    /// derivation that wraps per tooth makes a wheel jump one tooth every
+    /// time its driver's tooth phase rolls over. The teeth survive that; the
+    /// windows cut into the larger wheels do not. So: across one millisecond
+    /// the picture should change by about as much everywhere in the cycle.
+    /// The escapement lands twice a second and moves fast when it does, so
+    /// those moments are left out.
+    @Test("the driven wheels turn without jumping")
+    func drivenWheelsTurnSmoothly() throws {
+        var changes: [Double] = []
+        var time: Float = 6.0
+        while time < 9.0 {
+            let beat = (time * 2).truncatingRemainder(dividingBy: 1)
+            if beat > 0.15, beat < 0.48 {
+                guard let frame = try RenderedFrame.make(named: "gears", width: 320, height: 180, time: time),
+                      let next = try RenderedFrame.make(named: "gears", width: 320, height: 180, time: time + 0.001) else {
+                    return
+                }
+                changes.append(frame.fractionDiffering(from: next, byMoreThan: 40))
+            }
+            time += 0.01
+        }
+        let sorted = changes.sorted()
+        let median = sorted[sorted.count / 2]
+        let largest = sorted[sorted.count - 1]
+        #expect(
+            largest < 0.001,
+            "a wheel jumped: \(largest) of the frame changed in 1 ms against a typical \(median)"
+        )
+    }
 }
