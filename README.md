@@ -139,6 +139,7 @@ no effect at all.
 | `saturn`     | Saturn: banded globe, ringed, with the Cassini division and shadow. |
 | `raindrops`  | Drops running down a dark window, bending the city lights behind. |
 | `apollonian` | An Apollonian gasket, zooming in on a loop with no seam.          |
+| `contour`    | A contour map whose hills drift, cross-hatched like an engraving. |
 | `gradient`   | Not a screensaver: the fixture that proves the conversion works.  |
 
 `--list-shaders` prints the same list, taken from the shaders themselves.
