@@ -58,6 +58,61 @@ struct RenderedFrame {
         )
     }
 
+    /// Renders one shader at many times through a single renderer, or nothing
+    /// on a machine with no Metal device.
+    ///
+    /// `make` compiles the shader afresh on every call, which is fine for a
+    /// handful of frames and not for a sweep: hundreds of compilations in a
+    /// row take the CI runner's Metal down with the whole test process, and
+    /// it dies without a word. One renderer, one compile, one frame per time.
+    static func sequence(
+        named name: String, width: Int, height: Int, times: [Float], date: Date = pinnedDate
+    ) throws -> [RenderedFrame]? {
+        let program = try #require(
+            GeneratedShaders.all.first { $0.name == name },
+            "no shader named \(name) in the catalog"
+        )
+
+        shmExclusive.lock()
+        defer { shmExclusive.unlock() }
+
+        guard MTLCreateSystemDefaultDevice() != nil else { return nil }
+        prepareShmTracking()
+
+        let renderer = try MetalRenderer(
+            width: width,
+            height: height,
+            fragmentSource: program.source,
+            fragmentFunctionName: program.entryPoint
+        )
+        var state = try #require(
+            ShadertoyState(device: renderer.device, width: renderer.width, height: renderer.height)
+        )
+
+        var frames: [RenderedFrame] = []
+        frames.reserveCapacity(times.count)
+        for time in times {
+            state.update(time: time, frame: Int(time * 60), frameRate: 60, date: date)
+            let frame = try ShmFrame.create(
+                name: makeShmName(pid: getpid(), counter: uniqueCounters(1)[0]),
+                payloadBytes: renderer.payloadBytes
+            )
+            defer {
+                frame.closeMapping()
+                frame.unlink()
+            }
+            try renderer.render(into: frame, uniforms: state.uniforms)
+            let raw = frame.base.assumingMemoryBound(to: UInt8.self)
+            frames.append(RenderedFrame(
+                width: renderer.width,
+                height: renderer.height,
+                bytesPerRow: renderer.bytesPerRow,
+                pixels: Array(UnsafeBufferPointer(start: raw, count: renderer.bytesPerRow * renderer.height))
+            ))
+        }
+        return frames
+    }
+
     /// Renders a named shader, or nothing on a machine with no Metal device.
     static func make(
         named name: String, width: Int, height: Int, time: Float, date: Date = pinnedDate

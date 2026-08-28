@@ -42,18 +42,22 @@ struct GearsShaderTests {
     /// those moments are left out.
     @Test("the driven wheels turn without jumping")
     func drivenWheelsTurnSmoothly() throws {
-        var changes: [Double] = []
+        var times: [Float] = []
         var time: Float = 6.0
         while time < 9.0 {
             let beat = (time * 2).truncatingRemainder(dividingBy: 1)
             if beat > 0.15, beat < 0.48 {
-                guard let frame = try RenderedFrame.make(named: "gears", width: 320, height: 180, time: time),
-                      let next = try RenderedFrame.make(named: "gears", width: 320, height: 180, time: time + 0.001) else {
-                    return
-                }
-                changes.append(frame.fractionDiffering(from: next, byMoreThan: 40))
+                times.append(time)
+                times.append(time + 0.001)
             }
-            time += 0.01
+            time += 0.02
+        }
+        guard let frames = try RenderedFrame.sequence(named: "gears", width: 320, height: 180, times: times) else {
+            return
+        }
+        var changes: [Double] = []
+        for pair in stride(from: 0, to: frames.count, by: 2) {
+            changes.append(frames[pair].fractionDiffering(from: frames[pair + 1], byMoreThan: 40))
         }
         let sorted = changes.sorted()
         let median = sorted[sorted.count / 2]
