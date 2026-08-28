@@ -77,11 +77,47 @@ ghostty-saver [options]
                     written to it as a numbered sequence, 1/--fps apart
   --at SECONDS      with --dump, the iTime of the first frame (default 0)
   --stats           print a per-frame breakdown on exit
+
+~/.config/ghostty-saver/config supplies the defaults for
+--shader, --fps and --quiet-level, plus random-pool: the shaders --shader
+random draws from. The command line wins over it.
 ```
 
 Any keypress exits. The terminal is restored on exit, on SIGINT, SIGTERM and
 SIGHUP: images are deleted, the cursor comes back, the alternate screen is left
 and termios is put back the way it was.
+
+## Configuration
+
+`~/.config/ghostty-saver/config` holds the defaults, in the same `key = value`
+form as Ghostty's own config. `XDG_CONFIG_HOME` moves it. The file is optional;
+it is read once at startup, because a fresh process is launched on every lock.
+
+```ini
+# half rate, and only the quiet shaders
+fps = 30
+shader = random
+random-pool = matrix, aurora, tunnel
+```
+
+| key           | what it sets                             | default                      |
+| ------------- | ---------------------------------------- | ---------------------------- |
+| `fps`         | target frame rate, 0 for uncapped        | 60                           |
+| `shader`      | which shader to run, or `random`         | `matrix`                     |
+| `quiet-level` | how much the terminal replies: 0, 1 or 2 | 0                            |
+| `random-pool` | the shaders `random` draws from          | every shader but `gradient`  |
+
+The command line wins over the file, and the file wins over the built-in
+default. That is what makes `lock-command` short: tmux takes a single string,
+so a long list of flags is awkward to keep there.
+
+`--size`, `--seconds`, `--frames`, `--verify`, `--dump`, `--at` and `--stats`
+are for measurement and development, and stay on the command line.
+
+An unknown key, a duplicate one, or a value that does not parse stops startup
+with the file and line that caused it. Nothing is ignored: a screensaver runs
+unattended, and a silently dropped `fps = 30` would look like the file having
+no effect at all.
 
 ## Shaders
 
@@ -100,7 +136,8 @@ and termios is put back the way it was.
 `--list-shaders` prints the same list, taken from the shaders themselves.
 
 `--shader random` picks one for you at each lock, which is the point of having
-more than one. It never picks `gradient`.
+more than one. It never picks `gradient`, and `random-pool` in the config file
+narrows it further.
 
 ```tmux
 set -g lock-command '~/.local/bin/ghostty-saver --shader random'

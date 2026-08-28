@@ -101,6 +101,63 @@ struct ShaderCatalogTests {
         #expect(ShaderCatalog.select(named: ShaderCatalog.randomName, from: onlyFixture) != nil)
     }
 
+    /// `random-pool` in the config file narrows what `random` draws from.
+    @Test("random only draws from the pool it was given")
+    func randomHonoursPool() throws {
+        let pool = ShaderCatalog.resolvePool(["tunnel", "aurora"], in: GeneratedShaders.all).pool
+        try #require(pool.count == 2)
+
+        for _ in 0..<200 {
+            let program = try #require(ShaderCatalog.select(
+                named: ShaderCatalog.randomName, from: GeneratedShaders.all, randomPool: pool
+            ))
+            #expect(["tunnel", "aurora"].contains(program.name))
+        }
+    }
+
+    /// The pool says what `random` picks, not what a name may ask for.
+    @Test("a pool does not stop a shader being named")
+    func poolDoesNotRestrictNames() throws {
+        let pool = ShaderCatalog.resolvePool(["tunnel"], in: GeneratedShaders.all).pool
+        let program = try #require(ShaderCatalog.select(
+            named: "matrix", from: GeneratedShaders.all, randomPool: pool
+        ))
+        #expect(program.name == "matrix")
+    }
+
+    @Test("no pool leaves random drawing from the screensavers")
+    func noPoolKeepsTheDefault() throws {
+        for _ in 0..<50 {
+            let program = try #require(ShaderCatalog.select(
+                named: ShaderCatalog.randomName, from: GeneratedShaders.all, randomPool: nil
+            ))
+            #expect(!ShaderCatalog.fixtureNames.contains(program.name))
+        }
+    }
+
+    @Test("resolving a pool reports the names that match nothing")
+    func poolReportsUnknownNames() {
+        let resolved = ShaderCatalog.resolvePool(["matrix", "nope", "tunnel"], in: GeneratedShaders.all)
+        #expect(resolved.pool.map(\.name) == ["matrix", "tunnel"])
+        #expect(resolved.unknown == ["nope"])
+    }
+
+    /// Naming a shader twice is one entry, not two chances of being drawn.
+    @Test("a repeated name resolves once")
+    func poolDeduplicates() {
+        let resolved = ShaderCatalog.resolvePool(["matrix", "matrix"], in: GeneratedShaders.all)
+        #expect(resolved.pool.map(\.name) == ["matrix"])
+    }
+
+    /// The fixture is kept out of the pool `random` builds for itself, but
+    /// asking for it by name in `random-pool` is a deliberate choice.
+    @Test("a pool may name the fixture")
+    func poolMayNameTheFixture() {
+        let resolved = ShaderCatalog.resolvePool(["gradient"], in: GeneratedShaders.all)
+        #expect(resolved.pool.map(\.name) == ["gradient"])
+        #expect(resolved.unknown.isEmpty)
+    }
+
     /// The names in `fixtureNames` are matched against the catalog, so a
     /// renamed shader would leave the set pointing at nothing.
     @Test("every named fixture is in the catalog")
