@@ -140,6 +140,7 @@ no effect at all.
 | `raindrops`  | Drops running down a dark window, bending the city lights behind. |
 | `apollonian` | An Apollonian gasket, zooming in on a loop with no seam.          |
 | `contour`    | A contour map whose hills drift, cross-hatched like an engraving. |
+| `raster`     | A 16-bit sunset read back with a per-scanline offset: a flag, a tear. |
 | `gradient`   | Not a screensaver: the fixture that proves the conversion works.  |
 
 `--list-shaders` prints the same list, taken from the shaders themselves.
