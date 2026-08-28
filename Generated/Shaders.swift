@@ -107,6 +107,112 @@ public enum ShadertoyUniformLayout {
 
 /// MSL generated from shaders/*.glsl.
 public enum GeneratedShaders {
+    /// Generated from shaders/apollonian.glsl
+    public static let apollonian = ShaderProgram(
+        name: "apollonian",
+        summary: "An Apollonian gasket - circles packed into the gaps between circles, forever - zooming in on a loop that lands exactly on the next generation.",
+        entryPoint: "main0",
+        source: #"""
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Globals
+{
+    packed_float3 iResolution;
+    float iTime;
+    float iTimeDelta;
+    float iFrameRate;
+    int iFrame;
+    float4 iChannelTime[4];
+    float3 iChannelResolution[4];
+    float4 iMouse;
+    float4 iDate;
+    float iSampleRate;
+    float4 iCurrentCursor;
+    float4 iPreviousCursor;
+    float4 iCurrentCursorColor;
+    float4 iPreviousCursorColor;
+    int iCurrentCursorStyle;
+    int iPreviousCursorStyle;
+    int iCursorVisible;
+    float iTimeCursorChange;
+    float iTimeFocus;
+    int iFocus;
+    float3 iPalette[256];
+    float3 iBackgroundColor;
+    float3 iForegroundColor;
+    float3 iCursorColor;
+    float3 iCursorText;
+    float3 iSelectionForegroundColor;
+    float3 iSelectionBackgroundColor;
+};
+
+struct main0_out
+{
+    float4 _fragColor [[color(0)]];
+};
+
+static inline __attribute__((always_inline))
+void mainImage(thread float4& fragColor, thread const float2& fragCoord, constant Globals& _39)
+{
+    float2 uv = (fragCoord - (float2(_39.iResolution[0], _39.iResolution[1]) * 0.5)) / float2(_39.iResolution[1u]);
+    float phase = fract(_39.iTime / 24.0);
+    float turn = 0.550000011920928955078125 * phase;
+    float2 view = (float2x2(float2(cos(turn), sin(turn)), float2(-sin(turn), cos(turn))) * uv) * exp2(-phase);
+    float r = fast::max(length(view), 9.9999999747524270787835121154785e-07);
+    float lr = log2(r);
+    float octave = floor(lr);
+    float angle = precise::atan2(view.y, view.x) + (0.550000011920928955078125 * octave);
+    float2 z = float2(lr - octave, (angle / 6.283185482025146484375) * 6.0) * 2.0;
+    float pixel = fast::max(fwidth(z.x), fwidth(z.y));
+    float scale = 1.0;
+    float circle = 1000000000.0;
+    float weight = 0.0;
+    float trap = 1000000000.0;
+    float radius = 0.89442718029022216796875;
+    for (int i = 0; i < 7; i++)
+    {
+        z = (fract((z * 0.5) + float2(0.5)) * 2.0) - float2(1.0);
+        float r2 = dot(z, z);
+        float d = abs(sqrt(r2) - radius) / scale;
+        if (d < circle)
+        {
+            circle = d;
+            weight = smoothstep(pixel, pixel * 6.0, radius / scale);
+        }
+        trap = fast::min(trap, r2 + (0.300000011920928955078125 * float(i)));
+        float k = fast::max(0.800000011920928955078125 / r2, 1.0);
+        z *= k;
+        scale *= k;
+        if ((radius / scale) < (pixel * 0.5))
+        {
+            break;
+        }
+    }
+    float width = pixel * 1.2999999523162841796875;
+    float ink = (1.0 - smoothstep(0.0, width, circle)) * weight;
+    float t = fast::clamp(trap * 0.3499999940395355224609375, 0.0, 1.0);
+    float3 line = mix(float3(0.949999988079071044921875, 0.87999999523162841796875, 0.62000000476837158203125), float3(0.3499999940395355224609375, 0.7200000286102294921875, 0.949999988079071044921875), float3(0.5 + (0.5 * cos((6.283185482025146484375 * t) + angle))));
+    float3 color = float3(0.01200000010430812835693359375, 0.00999999977648258209228515625, 0.02199999988079071044921875) + ((float3(0.14000000059604644775390625, 0.063000001013278961181640625, 0.12600000202655792236328125) * (1.0 - t)) * (1.0 - ink));
+    color = mix(color, line, float3(ink));
+    fragColor = float4(color, 1.0);
+}
+
+fragment main0_out main0(constant Globals& _39 [[buffer(1)]], float4 gl_FragCoord [[position]])
+{
+    main0_out out = {};
+    float2 param_1 = gl_FragCoord.xy;
+    float4 param;
+    mainImage(param, param_1, _39);
+    out._fragColor = param;
+    return out;
+}
+"""#
+    )
     /// Generated from shaders/aurora.glsl
     public static let aurora = ShaderProgram(
         name: "aurora",
@@ -2519,5 +2625,5 @@ fragment main0_out main0(constant Globals& _72 [[buffer(1)]], float4 gl_FragCoor
 """#
     )
     /// Every converted shader, for selecting one by name.
-    public static let all: [ShaderProgram] = [aurora, chladni, gradient, hyperspace, matrix, mode7, moire, mystify, raindrops, saturn, starwars, synthwave, toasters, tunnel]
+    public static let all: [ShaderProgram] = [apollonian, aurora, chladni, gradient, hyperspace, matrix, mode7, moire, mystify, raindrops, saturn, starwars, synthwave, toasters, tunnel]
 }
