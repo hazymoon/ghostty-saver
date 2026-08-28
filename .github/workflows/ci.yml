@@ -58,6 +58,12 @@ jobs:
       - name: Check Generated/Shaders.swift is up to date
         run: Scripts/check-shaders-fresh.sh
 
+      - name: Check shaders/ against shaders/lib/
+        # A shader that redefines a library function fails glslang only when
+        # regenerated, and a const array in the library lands in every
+        # shader's MSL. Both are grep-able without the conversion tools.
+        run: Scripts/check-shader-lib.sh
+
       - name: Build
         run: swift build
 
