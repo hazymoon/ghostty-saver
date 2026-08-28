@@ -172,6 +172,16 @@ directory and is deleted with it.
 Set `GHOSTTY_SAVER_PREFIX_FILE` to a local copy to work offline, or
 `GHOSTTY_SAVER_PREFIX_REF` to move the pin.
 
+Helpers shared between shaders live in `shaders/lib/` - the hash family is
+there - and are prepended to every shader unconditionally. There is nothing to
+declare: what a shader does not call never reaches the MSL, so an unused
+helper costs nothing. The price is that a shader calling into the library is
+no longer a file Ghostty can read on its own, since a `custom-shader` is one
+file and resolves no `#include`. The build therefore also writes a
+self-contained copy of each shader, library included, to
+`.build/custom-shaders/<name>.glsl`, and that is the path a `custom-shader`
+should name. `shaders/<name>.glsl` stays the file to edit.
+
 Shaders must be stateless. Ghostty's custom-shader has no frame-to-frame
 storage, so everything is derived from `iTime` and a hash. `shaders/matrix.glsl`
 is written that way: trail positions, glyphs and depth all come out of the

@@ -104,14 +104,6 @@ const uint CRAWL[119] = uint[119](
     0x20202020u, 0x46202020u, 0x20454552u, 0x49414741u, 0x2E2E2E4Eu, 0x20202020u, 0x20202020u   // FREE AGAIN...
 );
 
-float hash11(float n) {
-    return fract(sin(n) * 43758.5453123);
-}
-
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
 uint glyphBits(uint code) {
     if (code >= 65u && code <= 90u) { return LETTERS[int(code) - 65]; }
     if (code == 46u) { return GLYPH_STOP; }

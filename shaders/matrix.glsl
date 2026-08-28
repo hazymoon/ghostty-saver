@@ -20,18 +20,6 @@ const float CELL_ASPECT = 0.62;   // width / height
 const vec3 HEAD_COLOR = vec3(0.78, 1.00, 0.85);
 const vec3 BODY_COLOR = vec3(0.00, 0.95, 0.32);
 
-float hash11(float n) {
-    return fract(sin(n) * 43758.5453123);
-}
-
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
-float hash31(vec3 p) {
-    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
-}
-
 // A 3x5 bit grid inside the cell. Coarse enough that the shapes read as
 // characters rather than as noise, and cheap enough to evaluate per pixel.
 float glyphMask(vec2 cellUV, float seed) {

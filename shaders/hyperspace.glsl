@@ -25,14 +25,6 @@ const float SPREAD = 4.2;         // e-foldings of radius a star crosses on its 
 const float NEAR_EDGE = 1.5;      // radius, in screen heights, it ends that journey at
 const float EXPOSURE = 1.0 / 26.0; // shutter time the streak length stands for
 
-float hash11(float n) {
-    return fract(sin(n) * 43758.5453123);
-}
-
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
 // Distance travelled since the last jump. Quadratic after the wind-up starts,
 // so the speed below is its exact derivative rather than a second guess at it.
 float travelled(float u) {
