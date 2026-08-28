@@ -91,16 +91,20 @@ jobs:
           test "$(shasum -a 256 "$out"/*.png | awk '{print $1}' | sort -u | wc -l)" -eq 3
 
       - name: Test
-        run: swift test
+        # The results also go to a file. The terminal-path suites open ttys
+        # and redirect descriptors, and a run has been seen where the log
+        # shows every suite "started" and then nothing - no result lines, no
+        # signal from swift test, no crash report - which reads as a process
+        # dying but is just as consistent with the result lines being lost.
+        # The XML is written independently of stdout.
+        run: swift test --xunit-output "$RUNNER_TEMP/results.xml"
 
-      - name: Show crash reports
-        # A test process that dies of a signal leaves the log with every
-        # suite "started" and nothing else - swift test says nothing about
-        # the signal. The crash report on the runner does.
-        if: failure()
+      - name: Show the test results
+        if: always()
         run: |
-          ls -t ~/Library/Logs/DiagnosticReports/ 2> /dev/null | head -5
-          for report in $(ls -t ~/Library/Logs/DiagnosticReports/*ghostty* ~/Library/Logs/DiagnosticReports/*xctest* ~/Library/Logs/DiagnosticReports/*swift* 2> /dev/null | head -2); do
-            echo "== $report"
-            head -c 20000 "$report"
+          for file in "$RUNNER_TEMP"/results*.xml; do
+            echo "== $file"
+            cat "$file"
+            echo
           done
+          ls -t ~/Library/Logs/DiagnosticReports/ /Library/Logs/DiagnosticReports/ 2> /dev/null | head -8
