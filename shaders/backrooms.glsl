@@ -44,8 +44,12 @@ const float PAUSE1 = 21.0;         // lap seconds at which each pause begins
 const float PAUSE2 = 78.0;
 const int STEPS = 36;              // cells walked per lap
 
-const float FOCAL = 0.85;          // 1 / tan(half the vertical field of view)
-const float BARREL = 0.13;         // lens distortion, the wide camcorder look
+// A 1990s camcorder at the wide end of its zoom is not wide: about 45
+// degrees across, 55 to 65 with the wide converter Kane Pixels' footage
+// looks shot through. This is the converter: 56 degrees across the 4:3
+// frame, with the converter's few percent of barrel on top.
+const float FOCAL = 1.25;          // 1 / tan(half the vertical field of view)
+const float BARREL = 0.05;         // lens distortion at the corners
 
 // Colours, before the camera's white balance goes wrong on them.
 const vec3 WALL_COLOR = vec3(0.78, 0.66, 0.30);
@@ -458,11 +462,22 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     col = mix(FOG_COLOR, col, fog);
 
     // --- the tape ----------------------------------------------------------
-    // Chroma bleed and fringing from the derivative of the scene: the red
-    // and blue records land a few pixels to either side of the green one.
-    // Every pixel reaches this line.
+    // Two colour faults, both from the derivative of the scene. Every pixel
+    // reaches this line.
+    //
+    // The lens's lateral chromatic aberration: red and blue land either side
+    // of green by an amount that grows with the image height, so the middle
+    // is clean and the corners fringe.
     vec3 dcol = dFdx(col);
-    col = vec3(col.r + dcol.r * 2.5, col.g, col.b - dcol.b * 2.5);
+    float fringe = 3.5 * r2;
+    col = vec3(col.r + dcol.r * fringe, col.g, col.b - dcol.b * fringe);
+    // The tape's chroma: recorded at a fraction of the luma bandwidth, so
+    // colour lags the edges it belongs to by several pixels to the right.
+    const vec3 LUMA = vec3(0.3, 0.59, 0.11);
+    float luma = dot(col, LUMA);
+    vec3 chroma = col - luma;
+    vec3 dchroma = dcol - dot(dcol, LUMA);
+    col = luma + chroma + dchroma * 6.0;
     col = max(col, 0.0);
 
     // The camcorder's white balance is wrong: it warms everything, lifts the
@@ -482,7 +497,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     col = mix(col, vec3(snow * 0.6), headSwitch * 0.9);
     col *= 0.9 + 0.1 * sin(fragCoord.y * 3.14159 * 0.5);
     col *= 0.97 + 0.06 * (hash11(floor(iTime * 24.0)) - 0.5);
-    col *= 1.0 - 0.4 * r2;
+    col *= 1.0 - 0.3 * r2;
 
     fragColor = vec4(clamp(col, 0.0, 1.0) * mask, 1.0);
 }
