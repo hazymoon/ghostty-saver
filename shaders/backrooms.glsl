@@ -29,8 +29,9 @@
 
 const float CELL = 4.0;            // metres per grid cell
 const float SUPER = 8.0;           // cells per repeating tile
-const float CEILING = 2.5;         // metres, the tubes hang just under it
-const float EYE = 1.55;            // camera height
+const float CEILING = 2.7;         // metres, a standard office drop ceiling
+const float EYE = 1.60;            // camera height: the eye of someone 170 cm
+                                   // tall, with the viewfinder pressed to it
 const float PILLAR = 0.19;         // half width of a corner pillar
 const float WALL_DENSITY = 0.42;   // fraction of edges that carry a wall
 const float LIGHT_DENSITY = 0.72;  // fraction of cells with a working tube
