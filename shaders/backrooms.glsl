@@ -430,7 +430,9 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float moving = pace(u);
     float yaw = heading + look
         + 0.05 * sin(t * 0.9) + 0.03 * sin(t * 2.3 + 1.0);
-    float pitch = -0.04 + 0.03 * sin(t * 0.7 + 2.0) + 0.02 * sin(t * 1.9)
+    // Level, on average: the walker looks down the room, not at the floor,
+    // and the barrel distortion already pulls the floor up into view.
+    float pitch = 0.03 * sin(t * 0.7 + 2.0) + 0.02 * sin(t * 1.9)
         + 0.012 * moving * sin(s * 2.0 * 6.2831853 * 2.8);
     float roll = 0.02 * sin(t * 0.5 + 1.0) + 0.012 * moving * sin(s * 6.2831853 * 2.8);
     float bob = 0.035 * moving * sin(s * 6.2831853 * 2.8 * 2.0);
