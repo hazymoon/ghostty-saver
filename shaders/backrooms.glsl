@@ -33,6 +33,7 @@ const float CEILING = 2.7;         // metres, a standard office drop ceiling
 const float EYE = 1.60;            // camera height: the eye of someone 170 cm
                                    // tall, with the viewfinder pressed to it
 const float PILLAR = 0.19;         // half width of a corner pillar
+const float WALL_HALF = 0.06;      // half thickness of a partition wall
 const float WALL_DENSITY = 0.42;   // fraction of edges that carry a wall
 const float LIGHT_DENSITY = 0.72;  // fraction of cells with a working tube
 const int MAX_CELLS = 40;          // DDA steps before a ray gives up in fog
@@ -123,9 +124,11 @@ const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 // inverted pendulum, flat at the top and sharp at the bottom (ARCH2,
 // ARCH3), each heel strike rings for a few hundredths of a second (IMPACT,
 // KICK), the pace surges at each strike and slows over the stance
-// (RIPPLE), and the head turns with the stride rather than at a steady
-// rate: its yaw oscillates at half the step rate, in phase with the sway
-// (GATE), and leads the body into a corner by about a second (LEAD).
+// (RIPPLE), and the head turns with the steps rather than at a steady
+// rate: its yaw advances fastest in each step's swing (GATE), and leads
+// the body into a corner by about a second (LEAD). Once a stride rather
+// than once a step, the turn came in pulses that read as pivoting on one
+// foot.
 const float BOB = 0.025;           // metres, vertical, once a step
 const float SWAY = 0.020;          // metres, lateral, once a stride
 const float GAIT_ROLL = 0.007;     // radians, once a stride
@@ -137,7 +140,7 @@ const float LEAD = 0.25;           // cells the head looks ahead of the body
 const float NECK = 0.10;           // metres from the neck's axis forward to the eyes
 const float NECK_MAX = 0.73;       // radians the head turns on the neck, at most
 const float LEAN = 0.025;          // metres shifted into a turn
-const float GATE = 0.65;           // depth of the stride's modulation of the yaw rate
+const float GATE = 0.5;            // depth of the step's modulation of the yaw rate
 const float ARCH2 = 0.20;          // second and third harmonics of the bob
 const float ARCH3 = 0.05;
 const float IMPACT = 0.004;        // metres the heel strike rings by
@@ -379,6 +382,46 @@ float hitPillars(vec3 ro, vec3 rd, vec2 cell, out vec3 normal) {
     return best;
 }
 
+// Nearest hit of the ray with the partition walls on the two edges of
+// `cell` the ray is heading for, as slabs WALL_HALF thick with their ends
+// exposed, or 1e9. `inv` is 1 / rd.xz and `step` is sign(rd.xz). The
+// walls on the two edges behind the ray were those ahead of it in the
+// cell before, and a wall's slab is thinner than a pillar, so a hit a
+// little beyond a cell's exit is accepted there and never missed here.
+float hitWalls(vec3 ro, vec3 rd, vec2 cell, vec2 inv, vec2 step, out vec3 normal) {
+    float best = 1e9;
+    normal = vec3(0.0);
+    for (int e = 0; e < 2; e++) {
+        bool axisX = e == 0;
+        float back = axisX ? step.x : step.y;
+        vec2 owner = cell - (back < 0.0 ? (axisX ? vec2(1.0, 0.0) : vec2(0.0, 1.0)) : vec2(0.0));
+        int kind = wallOn(owner, axisX);
+        if (kind == 0) continue;
+        float line = ((axisX ? owner.x : owner.y) + 1.0) * CELL;
+        float base = (axisX ? owner.y : owner.x) * CELL;
+        vec2 along = base + CELL * vec2(kind == 3 ? 0.5 : 0.0, kind == 2 ? 0.5 : 1.0);
+        float oa = axisX ? ro.x : ro.z;
+        float ol = axisX ? ro.z : ro.x;
+        float ia = axisX ? inv.x : inv.y;
+        float il = axisX ? inv.y : inv.x;
+        float a0 = (line - WALL_HALF - oa) * ia;
+        float a1 = (line + WALL_HALF - oa) * ia;
+        float l0 = (along.x - ol) * il;
+        float l1 = (along.y - ol) * il;
+        float enterA = min(a0, a1);
+        float enterL = min(l0, l1);
+        float enter = max(enterA, enterL);
+        float exit = min(max(a0, a1), max(l0, l1));
+        if (enter < exit && enter > 0.0 && enter < best) {
+            best = enter;
+            // The face or an end: whichever axis the ray entered the box on.
+            bool onFace = enterA > enterL;
+            normal = (onFace == axisX) ? vec3(-sign(rd.x), 0.0, 0.0) : vec3(0.0, 0.0, -sign(rd.z));
+        }
+    }
+    return best;
+}
+
 // Trace the ray. Returns the distance; `id` says what was hit (0 floor,
 // 1 ceiling, 2 wall, 3 pillar), `normal` faces the camera.
 float trace(vec3 ro, vec3 rd, out int id, out vec3 normal) {
@@ -394,40 +437,27 @@ float trace(vec3 ro, vec3 rd, out int id, out vec3 normal) {
     vec2 next = ((cell + max(step, 0.0)) * CELL - ro.xz) * inv;
     vec2 delta = abs(CELL * inv);
 
+    // A wall's slab reaches WALL_HALF past the boundary; a hit that far
+    // beyond the cell's exit is still in this cell's walls.
+    float slack = WALL_HALF * max(abs(inv.x), abs(inv.y));
     float t = 0.0;
     for (int i = 0; i < MAX_CELLS; i++) {
-        vec3 pn;
+        vec3 pn, wn;
         float pt = hitPillars(ro, rd, cell, pn);
+        float wt = hitWalls(ro, rd, cell, inv, step, wn);
         float exit = min(next.x, next.y);
-        if (pt < exit && pt < planeT) {
-            id = 3;
-            normal = pn;
-            return pt;
+        float solid = min(pt, wt);
+        if (solid < exit + slack && solid < planeT) {
+            id = pt < wt ? 3 : 2;
+            normal = pt < wt ? pn : wn;
+            return solid;
         }
         if (planeT < exit) {
             id = planeId;
             normal = vec3(0.0, planeId == 0 ? 1.0 : -1.0, 0.0);
             return planeT;
         }
-        // Crossing a boundary: is there a wall on it, here?
         bool axisX = next.x < next.y;
-        vec3 p = ro + rd * exit;
-        int kind;
-        float along;
-        if (axisX) {
-            vec2 wallCell = step.x > 0.0 ? cell : cell - vec2(1.0, 0.0);
-            kind = wallOn(wallCell, true);
-            along = fract(p.z / CELL);
-        } else {
-            vec2 wallCell = step.y > 0.0 ? cell : cell - vec2(0.0, 1.0);
-            kind = wallOn(wallCell, false);
-            along = fract(p.x / CELL);
-        }
-        if (wallCovers(kind, along)) {
-            id = 2;
-            normal = axisX ? vec3(-step.x, 0.0, 0.0) : vec3(0.0, 0.0, -step.y);
-            return exit;
-        }
         if (axisX) {
             cell.x += step.x;
             next.x += delta.x;
@@ -477,24 +507,65 @@ vec2 tubeCentre(vec2 cell) {
     return (cell + 0.5) * CELL;
 }
 
+// Whether light from l reaches p on the floor plan: a walk over the cell
+// boundaries the segment crosses, stopped by a wall that covers the
+// crossing. Pillars are ignored; they are thin and the light is broad.
+bool litFrom(vec2 p, vec2 l) {
+    vec2 d = l - p;
+    vec2 cell = floor(p / CELL);
+    vec2 target = floor(l / CELL);
+    vec2 step = sign(d);
+    vec2 inv = 1.0 / vec2(d.x == 0.0 ? 1e-6 : d.x, d.y == 0.0 ? 1e-6 : d.y);
+    vec2 next = ((cell + max(step, 0.0)) * CELL - p) * inv;
+    vec2 delta = abs(CELL * inv);
+    for (int i = 0; i < 4; i++) {
+        if (all(equal(cell, target))) return true;
+        bool axisX = next.x < next.y;
+        float u = axisX ? next.x : next.y;
+        if (u > 1.0) return true;
+        vec2 q = p + d * u;
+        int kind;
+        float along;
+        if (axisX) {
+            kind = wallOn(step.x > 0.0 ? cell : cell - vec2(1.0, 0.0), true);
+            along = fract(q.y / CELL);
+            cell.x += step.x;
+            next.x += delta.x;
+        } else {
+            kind = wallOn(step.y > 0.0 ? cell : cell - vec2(0.0, 1.0), false);
+            along = fract(q.x / CELL);
+            cell.y += step.y;
+            next.y += delta.y;
+        }
+        if (wallCovers(kind, along)) return false;
+    }
+    return true;
+}
+
 // Light arriving at p with normal n from the tubes in the surrounding cells:
-// direct light, and a share that bounced off everything else, which is what
-// keeps the ceiling from going black when the tubes hang level with it.
+// direct light from the tubes that have a clear line to p across the walls,
+// from the cells within two steps of p's on the floor plan, and a share
+// that bounced off everything else, which is what keeps the ceiling from
+// going black when the tubes hang level with it, and what light the walls'
+// shadows have.
 vec3 lighting(vec3 p, vec3 n, float t) {
-    vec2 cell = floor(p.xz / CELL);
+    vec2 from = p.xz + n.xz * 0.05;  // off its own wall
+    vec2 cell = floor(from / CELL);
     float direct = 0.0;
     float bounced = 0.0;
     for (int dz = -2; dz <= 2; dz++) {
         for (int dx = -2; dx <= 2; dx++) {
+            if (abs(dx) + abs(dz) > 2) continue;
             vec2 c = cell + vec2(float(dx), float(dz));
             float level = tubeLevel(c, t);
             if (level == 0.0) continue;
             vec3 lp = vec3(tubeCentre(c).x, CEILING - 0.05, tubeCentre(c).y);
             vec3 l = lp - p;
             float d2 = dot(l, l);
-            float lambert = max(dot(n, l * inversesqrt(d2)), 0.0);
-            direct += level * lambert * 4.5 / (1.0 + d2 * 0.55);
             bounced += level * 0.5 / (1.0 + d2 * 0.3);
+            float lambert = max(dot(n, l * inversesqrt(d2)), 0.0);
+            if (lambert == 0.0 || !litFrom(from, lp.xz)) continue;
+            direct += level * lambert * 4.5 / (1.0 + d2 * 0.55);
         }
     }
     return (direct + bounced) * TUBE_COLOR;
@@ -637,12 +708,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     smoothPath(s, body, going);
     float heading = atan(going.x, going.y);
     float gait = moving * length(going);
-    // The head turns on the neck ahead of the body, and with the stride:
+    // The head turns on the neck ahead of the body, and with the steps:
     // its heading is read at an arc length warped so that d(warped)/ds =
-    // 1 + GATE * sin(2 pi stride), fastest when the sway peaks and slowest
-    // half a stride later. The neck's angle is also how far into a turn
-    // the body is, for the lean.
-    float warped = s - moving * GATE / (3.14159265 * PACE) * cos(6.2831853 * strideP);
+    // 1 + GATE * sin(2 pi step), fastest a quarter step after each heel
+    // strike, in the swing, and slowest before the next. The neck's angle
+    // is also how far into a turn the body is, for the lean.
+    float warped = s - moving * GATE / (6.2831853 * PACE) * cos(6.2831853 * su);
     vec2 unused, facing;
     smoothPath(warped + LEAD, unused, facing);
     float neck = atan(facing.x, facing.y) - heading;
