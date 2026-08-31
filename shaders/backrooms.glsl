@@ -45,8 +45,9 @@ const int MAX_CELLS = 24;          // DDA steps before a ray gives up in fog: 96
 // probability DROP_CHANCE in every DROP_SLOT seconds; a tracking band rolls
 // with probability BAND_CHANCE in every BAND_SLOT seconds; the deck's
 // servo loses the time base with probability WOBBLE_CHANCE in every
-// WOBBLE_SLOT seconds. All of them are rare: the walk should be dull, and
-// a fault is an event.
+// WOBBLE_SLOT seconds. All of them are rare where nothing is happening:
+// the walk should be dull, and a fault is an event. Where something is
+// happening they are not rare at all; see STORM_LEAD.
 const float FIT_SLOT = 10.0;
 const float FIT_CHANCE = 0.15;
 const float FIT_LENGTH = 0.7;      // seconds a fit lasts
@@ -60,6 +61,25 @@ const float WOBBLE_SLOT = 12.0;
 const float WOBBLE_CHANCE = 0.25;
 const float WOBBLE_LENGTH = 4.0;   // seconds the ripple takes to swell and die
 const float WOBBLE = 0.0012;       // of the picture's height the verticals ripple by, at most
+
+// Except around the two things the walker reacts to, where the tape is
+// worse. Whether a tape really knows what is on it is not a question found
+// footage has ever wanted asked: the picture goes wrong where something is
+// wrong, it starts going wrong before the thing rather than after it, and
+// that is most of how the form tells you to be afraid. So a disturbance
+// comes up over STORM_LEAD seconds before the fright and the stop and
+// takes STORM_TRAIL to go, and while it is up the deck drops more frames,
+// tears more bands, loses the time base more often and lays down more
+// noise. Nothing about it is a new kind of fault: it is the same four,
+// asked for more often and louder, so what it looks like is a tape that
+// was always going to do this getting to the part where it does.
+const float STORM_LEAD = 6.0;      // seconds it is up before
+const float STORM_TRAIL = 10.0;    // and takes to die after
+const float STORM_DROP = 0.35;     // added to DROP_CHANCE at its peak
+const float STORM_BAND = 0.50;     // to BAND_CHANCE
+const float STORM_WOBBLE = 0.50;   // and to WOBBLE_CHANCE
+const float STORM_GRAIN = 1.30;    // how much more noise there is in Y and in colour
+const float STORM_SNOW = 0.12;     // and how much further down the snow's threshold goes
 
 // The tape's colour. VHS records luma as FM, which suppresses noise above
 // its threshold, and colour as AM on a 629 kHz subcarrier, which does not;
@@ -119,14 +139,20 @@ const float PAUSE2 = 106.0;        // on the blackout's edge, and on the way bac
 const int STEPS = 30;              // cells walked per lap
 const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 
-// Everywhere the walk is held back, as a start, a length, an ease and a
-// depth: 1 stops it and less than 1 only slows it. The two pauses, and
-// either side of the first of them the creep - the walk up the edge of the
-// blackout, which is the one stretch of the lap the walker can see into
-// the dark from, taken at not much over half pace. It is the same thing
-// `care` reads out of the light (see SNEAK_DARK0) and the one thing about
-// it that can be seen: the gait's own carefulness is millimetres of eye
-// motion and the speed is the whole room coming at you slower.
+// Everywhere the walk is off its pace, as a start, a length, an ease and a
+// depth: 1 stops it, less than 1 slows it, and below zero it is the walk
+// going faster instead. There are four things in it.
+//
+// The two pauses. Either side of the first of them the creep - the walk up
+// the edge of the blackout, which is the one stretch of the lap the walker
+// can see into the dark from, taken at half pace. The stop that nothing
+// explains. And after each of the two things the walker reacts to, a
+// while spent walking faster than they were before it: not running, which
+// would be a different tape, but the pace of somebody who has decided they
+// would rather be somewhere else and is not admitting it. The first of
+// them starts inside the creep's own ease, so the walk goes from treading
+// to hurrying without passing through its ordinary pace, which is what the
+// decision looks like.
 //
 // The depths add, so no entry may overlap another far enough to take the
 // total over 1 or the walk goes backwards. The two creeps are written so
@@ -134,9 +160,11 @@ const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 // 1 and no more, which is also what lets the walk creep into the stop and
 // creep back out of it rather than returning to pace first.
 //
-// Whatever they cost between them comes back as speed everywhere else:
-// walkSpeed divides by what is left of the lap, so a lap is always STEPS
-// cells however much of it is spent going slowly.
+// Whatever they cost between them comes back everywhere else: walkSpeed
+// divides by what is left of the lap, so a lap is always STEPS cells
+// however much of it is spent going slowly, and the hurrying is paid for
+// by the ordinary pace being a little under a metre a second rather than
+// a little over.
 // The third stop is not planned at all. It is three seconds, it stops the
 // walk in six tenths rather than two seconds, and nothing in the picture
 // says why: the walker has heard something, and the tape does not record
@@ -145,18 +173,25 @@ const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 // faults or the tubes' fits, which are hashed on absolute time and would
 // line up with it on one lap in a hundred and never again.
 const float CREEP = 0.45;          // how much of the pace the creep takes off
-const float CREEP_IN = 8.27;       // seconds of it before the pause: from where
+const float CREEP_IN = 6.77;       // seconds of it before the pause: from where
                                    // the blackout's first doorway comes into view
-const float CREEP_OUT = 15.90;     // and after it: past the last of the doorways
-const float FREEZE_AT = 130.3;     // lap second the walk stops dead
+const float CREEP_OUT = 18.89;     // and after it: past the last of the doorways
+const float FREEZE_AT = 132.25;    // lap second the walk stops dead
 const float FREEZE = 3.0;          // for this long
 const float FREEZE_EASE = 0.6;     // and this is all the warning it gives
-const vec4 HOLDING_BACK[5] = vec4[5](
+const float HURRY = -0.30;         // how much faster the walk is afterwards
+const float HURRY_ON = 2.5;        // seconds it takes to pick up, after the blackout
+const float HURRY_LEN = 22.0;      // and how long it lasts
+const float HURRY2_ON = 1.5;       // and after the stop, where it is quicker to
+const float HURRY2_LEN = 12.0;     // come on and does not last as long
+const vec4 OFF_PACE[7] = vec4[7](
     vec4(PAUSE1, PAUSE, EASE, 1.0),
     vec4(PAUSE2, PAUSE, EASE, 1.0),
     vec4(PAUSE1 - CREEP_IN, CREEP_IN + EASE, EASE, CREEP),
     vec4(PAUSE1 + PAUSE - EASE, CREEP_OUT + EASE, EASE, CREEP),
-    vec4(FREEZE_AT, FREEZE, FREEZE_EASE, 1.0)
+    vec4(FREEZE_AT, FREEZE, FREEZE_EASE, 1.0),
+    vec4(PAUSE1 + PAUSE + CREEP_OUT - EASE, HURRY_LEN, HURRY_ON, HURRY),
+    vec4(FREEZE_AT + FREEZE, HURRY2_LEN, HURRY2_ON, HURRY)
 );
 
 // The camera is held by a person, and a person's head is steadier than the
@@ -225,7 +260,7 @@ const float GAZE_OFF = 1.6;        // and to come back off it
 // the whole point of a glance behind is that it is over before it has
 // begun.
 const float GLANCE = -1.7;         // radians over the left shoulder
-const float GLANCE_AT = 82.27;     // lap second it starts
+const float GLANCE_AT = 81.68;     // lap second it starts
 const float GLANCE_LEN = 6.0;      // seconds it is anything at all
 const float GLANCE_ON = 1.8;       // of which this is turning to look
 const float GLANCE_OFF = 2.4;      // and this is turning back
@@ -411,11 +446,12 @@ float bumpRate(float u, float a0, float a1, float b0, float b1) {
     return smoothstepRate(a0, a1, u) - smoothstepRate(b0, b1, u);
 }
 
-// Seconds of walking lost by lap-time u to one entry of HOLDING_BACK: it
+// Seconds of walking lost by lap-time u to one entry of OFF_PACE: it
 // eases off over e.z, holds at a depth of e.w, and eases back on over e.z
-// again. A depth of 1 is a stop and anything less is the walk going slower
-// for a while; either way, past its end the entry has cost exactly
-// e.w * (e.y - e.z) seconds and costs nothing more.
+// again. A depth of 1 is a stop, less is the walk going slower for a
+// while, and below zero it is seconds gained rather than lost; either way,
+// past its end the entry has come to exactly e.w * (e.y - e.z) seconds and
+// moves no further.
 float slowed(float u, vec4 e) {
     return e.w * (smoothstepIntegral(e.x, e.x + e.z, u)
                 - smoothstepIntegral(e.x + e.y - e.z, e.x + e.y, u));
@@ -423,7 +459,7 @@ float slowed(float u, vec4 e) {
 
 float slowedAll(float u) {
     float lost = 0.0;
-    for (int i = 0; i < HOLDING_BACK.length(); i++) lost += slowed(u, HOLDING_BACK[i]);
+    for (int i = 0; i < OFF_PACE.length(); i++) lost += slowed(u, OFF_PACE[i]);
     return lost;
 }
 
@@ -435,8 +471,8 @@ float slowedAll(float u) {
 // entry would only ever happen once.
 float walkSpeed() {
     float lost = 0.0;
-    for (int i = 0; i < HOLDING_BACK.length(); i++) {
-        vec4 e = HOLDING_BACK[i];
+    for (int i = 0; i < OFF_PACE.length(); i++) {
+        vec4 e = OFF_PACE[i];
         lost += e.w * (e.y - e.z);
     }
     return float(STEPS) / (LAP - lost);
@@ -446,13 +482,14 @@ float walked(float u) {
     return walkSpeed() * (u - slowedAll(u));
 }
 
-// Fraction of walking pace at lap-time u: 1 on the move, 0 mid-pause, and
-// in between where the walk is only being held back. Drives the footstep
-// bob, so it fades out as the camera stops.
+// Fraction of walking pace at lap-time u: 1 on the move, 0 mid-pause, in
+// between where the walk is only being held back, and over 1 where it is
+// hurrying. Drives the footstep bob, so it fades out as the camera stops
+// and grows a little where the walk picks up.
 float pace(float u) {
     float held = 0.0;
-    for (int i = 0; i < HOLDING_BACK.length(); i++) {
-        vec4 e = HOLDING_BACK[i];
+    for (int i = 0; i < OFF_PACE.length(); i++) {
+        vec4 e = OFF_PACE[i];
         held += e.w * bump(u, e.x, e.x + e.z, e.x + e.y - e.z, e.x + e.y);
     }
     return 1.0 - held;
@@ -462,6 +499,16 @@ float pace(float u) {
 float fright(float u) {
     return bump(u, FRIGHT_AT, FRIGHT_AT + FRIGHT_ON,
                 FRIGHT_AT + FRIGHT_LEN - FRIGHT_OFF, FRIGHT_AT + FRIGHT_LEN);
+}
+
+// How badly the tape is going at lap-time u, from 0 to 1: up either side of
+// the fright and of the stop, and nothing anywhere else. See STORM_LEAD.
+float stormAt(float u) {
+    float about = bump(u, FRIGHT_AT - STORM_LEAD, FRIGHT_AT - STORM_LEAD * 0.35,
+                       FRIGHT_AT + STORM_TRAIL * 0.35, FRIGHT_AT + STORM_TRAIL)
+                + bump(u, FREEZE_AT - STORM_LEAD, FREEZE_AT - STORM_LEAD * 0.35,
+                       FREEZE_AT + STORM_TRAIL * 0.35, FREEZE_AT + STORM_TRAIL);
+    return clamp(about, 0.0, 1.0);
 }
 
 // The bump of a look taken while stood still: how far the camera has turned
@@ -887,22 +934,22 @@ vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
 
 // Scene time, after the deck has dropped a frame: in every DROP_SLOT
 // seconds there is a chance the picture freezes for DROP_HOLD.
-float droppedFrames(float t) {
+float droppedFrames(float t, float storm) {
     float slot = floor(t / DROP_SLOT);
     float h = hash11(slot * 3.1 + 0.7);
     float start = slot * DROP_SLOT + h * (DROP_SLOT - DROP_HOLD);
-    float hold = step(h, DROP_CHANCE) * DROP_HOLD;
+    float hold = step(h, DROP_CHANCE + storm * STORM_DROP) * DROP_HOLD;
     return t - clamp(t - start, 0.0, hold);
 }
 
 // The tracking band: a bright, torn stripe that rolls up the picture now
 // and then, for BAND_ROLL seconds at the start of a BAND_SLOT that draws
 // it. Returns its strength at screen height y (0 at the bottom).
-float trackingBand(float y, float t) {
+float trackingBand(float y, float t, float storm) {
     float slot = floor(t / BAND_SLOT);
     float within = t - slot * BAND_SLOT;
     float h = hash11(slot * 7.3 + 2.1);
-    float rolling = step(h, BAND_CHANCE) * step(within, BAND_ROLL);
+    float rolling = step(h, BAND_CHANCE + storm * STORM_BAND) * step(within, BAND_ROLL);
     float centre = fract(h * 13.0 - within * 0.55);
     float d = abs(y - centre);
     float width = 0.035 + 0.02 * hash11(slot + 9.0);
@@ -914,12 +961,12 @@ float trackingBand(float y, float t) {
 // holds it most of the time and loses it now and then, for WOBBLE_LENGTH
 // seconds somewhere in a WOBBLE_SLOT that draws it, the ripple swelling
 // and dying away. Returns its strength at time t.
-float timeBaseError(float t) {
+float timeBaseError(float t, float storm) {
     float slot = floor(t / WOBBLE_SLOT);
     float h = hash11(slot * 5.7 + 3.3);
     float start = slot * WOBBLE_SLOT + hash11(slot * 2.9 + 1.7) * (WOBBLE_SLOT - WOBBLE_LENGTH);
     float since = t - start;
-    float on = step(h, WOBBLE_CHANCE) * step(0.0, since) * step(since, WOBBLE_LENGTH);
+    float on = step(h, WOBBLE_CHANCE + storm * STORM_WOBBLE) * step(0.0, since) * step(since, WOBBLE_LENGTH);
     return on * sin(3.14159265 * clamp(since / WOBBLE_LENGTH, 0.0, 1.0));
 }
 
@@ -1118,16 +1165,20 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float stale = abs(mod(line, 2.0) - mod(fieldNo, 2.0));  // 1 on the older field's lines
     float lineField = fieldNo - stale;
     float now = iTime - (fields - fieldNo) / FIELD_RATE;     // this field's instant
-    float tNow = droppedFrames(now);  // a dropped frame holds both fields
+    // How badly the tape is going just now, from where the walk has got to:
+    // read before the dropped frame, since the drop is one of the things it
+    // decides. See STORM_LEAD.
+    float storm = stormAt(mod(now, LAP));
+    float tNow = droppedFrames(now, storm);  // a dropped frame holds both fields
     vec2 fseed = floor(vec2(hash11(fieldNo + 0.31), hash11(fieldNo + 0.77)) * 100.0);
 
     // Tape faults that displace whole scan lines are applied here, to the
     // ray, so the picture really shifts rather than a copy of it.
-    float band = trackingBand(screenY, now);
+    float band = trackingBand(screenY, now, storm);
     float bandShift = band * (0.05 + 0.04 * hash11(floor(screenY * 90.0) + fseed.x));
     float headSwitch = 1.0 - smoothstep(0.0, 0.03, screenY);
     float headShift = headSwitch * 0.03 * (fseed.y * 0.01 - 0.5);
-    float wobble = WOBBLE * sin(screenY * 37.0 + now * 21.0) * timeBaseError(now);
+    float wobble = WOBBLE * sin(screenY * 37.0 + now * 21.0) * timeBaseError(now, storm);
     uv.x += bandShift + headShift + wobble;
 
     // The lens: barrel distortion, then a wide field of view.
@@ -1210,7 +1261,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // band and worst at its edges.
     vec2 blotch = vec2(cheap21(chromaCell + fseed), cheap21(chromaCell + fseed.yx + 7.0)) * 2.0 - 1.0;
     C *= 1.0 - band * 0.85;
-    C += blotch * (CHROMA_NOISE + bandEdge * 0.35);
+    C += blotch * (CHROMA_NOISE * (1.0 + storm * STORM_GRAIN) + bandEdge * 0.35);
     // Cross-colour: a horizontal luma slope near the subcarrier's frequency
     // is demodulated as colour. The subcarrier turns a quarter cycle a
     // pixel here and, as NTSC's does, a quarter cycle back a line of the
@@ -1229,8 +1280,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // torn bright tracking band, and snow at the head switch, both grey,
     // all seeded by the field.
     float grain = cheap21(floor(fragCoord / 2.5) + fseed);
-    float snow = step(0.93, cheap21(lumaCell + fseed + 3.0)) - step(0.93, cheap21(lumaCell + fseed.yx + 5.0));
-    Y += (grain - 0.5) * LUMA_GRAIN + snow * (LUMA_SNOW + band * 0.55);
+    float snowGate = 0.93 - storm * STORM_SNOW;
+    float snow = step(snowGate, cheap21(lumaCell + fseed + 3.0))
+        - step(snowGate, cheap21(lumaCell + fseed.yx + 5.0));
+    Y += (grain - 0.5) * LUMA_GRAIN * (1.0 + storm * STORM_GRAIN)
+        + snow * (LUMA_SNOW * (1.0 + storm * STORM_GRAIN) + band * 0.55);
     float bandNoise = cheap21(vec2(floor(screenY * 240.0), fseed.y));
     Y = mix(Y, 0.7 + 0.3 * bandNoise, band * 0.8);
     float headSnow = cheap21(floor(fragCoord) + fseed.yx);
