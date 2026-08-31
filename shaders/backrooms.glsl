@@ -52,15 +52,15 @@ const float BAND_SLOT = 10.0;
 const float BAND_CHANCE = 0.2;
 const float BAND_ROLL = 2.0;       // seconds the band takes to roll through
 
-// The walk is slow: 36 cells in what is left of a 175 s lap after two
-// pauses is 0.91 m/s, the pace of someone who does not know the place,
+// The walk is slow: 30 cells in what is left of a 150 s lap after two
+// pauses is 0.90 m/s, the pace of someone who does not know the place,
 // against the 1.3 m/s of a commuter.
-const float LAP = 175.0;           // seconds per lap of the walk
+const float LAP = 150.0;           // seconds per lap of the walk
 const float PAUSE = 10.0;          // seconds the camera stands still, twice a lap
 const float EASE = 2.0;            // seconds to slow into and out of a pause
 const float PAUSE1 = 30.0;         // lap seconds at which each pause begins:
-const float PAUSE2 = 113.0;        // on the blackout's edge, and on the way back
-const int STEPS = 36;              // cells walked per lap
+const float PAUSE2 = 106.0;        // on the blackout's edge, and on the way back
+const int STEPS = 30;              // cells walked per lap
 const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 
 // The camera is held by a person, and a person's head is steadier than the
@@ -84,11 +84,13 @@ const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 //   rather than a swell.
 // - Roll is a fraction of a degree with each stride, and never on a turn.
 //   Leaning into a turn is a lateral shift of LEAN instead.
-// - Turns are spread over TURN cells of the path so the yaw rate stays
-//   under about 40 degrees a second, and the looks in the pauses under 60.
+// - Turns are spread over a tent of TURN cells either side of the path's
+//   corner, so the yaw rate is continuous and stays under about 30
+//   degrees a second, and the looks in the pauses under 60.
 //   The body walks the same smoothed path that its heading is read from,
 //   so it always moves the way it faces and slows into a corner, on a
-//   radius of about 1.5 m; and the head turns on the neck, NECK metres
+//   radius of about 2 m; the gait scales with that speed, so it does not
+//   march on the spot through a corner; and the head turns on the neck, NECK metres
 //   behind the eyes, so turning the head moves the eyes sideways and the
 //   picture parallaxes as well as rotates. Without both, a turn is a tank
 //   pivoting on the spot.
@@ -107,7 +109,7 @@ const float GAIT_ROLL = 0.007;     // radians, once a stride
 const float GAZE = 6.0;            // metres ahead, where the eyes fix
 const float VOR_STEP = 0.75;       // share of the step's fundamental the eyes counter
 const float VOR_HIGH = 0.5;        // share of the harmonics and the strike
-const float TURN = 1.8;            // cells over which a corner is turned
+const float TURN = 1.5;            // cells either side of a corner it is turned over
 const float LEAD = 0.25;           // cells the head looks ahead of the body
 const float NECK = 0.10;           // metres from the neck's axis forward to the eyes
 const float NECK_MAX = 0.73;       // radians the head turns on the neck, at most
@@ -144,25 +146,32 @@ const vec3 FOG_COLOR = vec3(0.09, 0.075, 0.03);
 // from it: bit 1 = +x, 2 = +z, 4 = -x, 8 = -z, indexed by z * SUPER + x.
 // The three edges between x = 4 and x = 5 at z = 3..5 are open too, so the
 // first pause looks into the blackout rather than at a wall.
-const vec2 WAYPOINT[37] = vec2[37](
-    vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(2.0, 1.0), vec2(3.0, 1.0), vec2(3.0, 2.0),
-    vec2(4.0, 2.0), vec2(4.0, 3.0), vec2(4.0, 4.0), vec2(4.0, 5.0), vec2(3.0, 5.0),
-    vec2(2.0, 5.0), vec2(2.0, 4.0), vec2(1.0, 4.0), vec2(0.0, 4.0), vec2(0.0, 5.0),
-    vec2(0.0, 6.0), vec2(1.0, 6.0), vec2(2.0, 6.0), vec2(3.0, 6.0), vec2(3.0, 7.0),
-    vec2(4.0, 7.0), vec2(5.0, 7.0), vec2(6.0, 7.0), vec2(6.0, 6.0), vec2(7.0, 6.0),
-    vec2(7.0, 7.0), vec2(7.0, 8.0), vec2(6.0, 8.0), vec2(5.0, 8.0), vec2(5.0, 9.0),
-    vec2(4.0, 9.0), vec2(4.0, 10.0), vec2(3.0, 10.0), vec2(3.0, 9.0), vec2(2.0, 9.0),
-    vec2(2.0, 8.0), vec2(1.0, 8.0)
+//
+// The walk is one wide anticlockwise loop with six corners, none nearer
+// than three cells to the next, and it leaves the tile heading the way it
+// entered. Corners any closer than that, and above all a pair that
+// reverses the direction within a cell or two, come out of the smoothing
+// below as the body turning on the spot while its feet keep going, which
+// is not walking. No room is entered twice from the same side, and none
+// of the blackout's rooms is entered at all.
+const vec2 WAYPOINT[31] = vec2[31](
+    vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(1.0, 2.0), vec2(2.0, 2.0), vec2(3.0, 2.0),
+    vec2(4.0, 2.0), vec2(4.0, 3.0), vec2(4.0, 4.0), vec2(4.0, 5.0), vec2(4.0, 6.0),
+    vec2(4.0, 7.0), vec2(4.0, 8.0), vec2(4.0, 9.0), vec2(4.0, 10.0), vec2(3.0, 10.0),
+    vec2(2.0, 10.0), vec2(1.0, 10.0), vec2(0.0, 10.0), vec2(-1.0, 10.0), vec2(-2.0, 10.0),
+    vec2(-3.0, 10.0), vec2(-3.0, 9.0), vec2(-3.0, 8.0), vec2(-3.0, 7.0), vec2(-3.0, 6.0),
+    vec2(-2.0, 6.0), vec2(-1.0, 6.0), vec2(0.0, 6.0), vec2(1.0, 6.0), vec2(1.0, 7.0),
+    vec2(1.0, 8.0)
 );
 const int OPEN_SIDES[64] = int[64](
-     0,  3,  6,  0,  0,  3,  5, 12,
-     0,  9, 13,  6,  3, 12,  0,  0,
-     0,  0,  0,  9, 14,  0,  0,  0,
+     0, 10,  0,  0, 10, 10,  0,  0,
+     0, 10,  0,  0, 10, 10,  0,  0,
+     5, 13,  5,  5, 14,  9,  5,  5,
      0,  0,  0,  0, 11,  4,  0,  0,
-     3,  5,  6,  0, 11,  4,  0,  0,
-    10,  0,  9,  5, 13,  4,  0,  0,
-     9,  5,  5,  6,  0,  0,  3,  6,
-     0,  0,  0,  9,  5,  5, 12, 10
+     0,  0,  0,  0, 11,  4,  0,  0,
+     0,  0,  0,  0, 11,  4,  0,  0,
+     5,  6,  0,  0, 10,  3,  5,  5,
+     0, 10,  0,  0, 10, 10,  0,  0
 );
 
 // The dark corner: cells x in [5, 8) and z in [3, 6) of every tile have no
@@ -229,61 +238,43 @@ vec2 waypoint(float k) {
     return WAYPOINT[int(k - lap * float(STEPS))] + vec2(0.0, lap * SUPER);
 }
 
-// Position on the polyline at arc length s (cells), in cells.
-vec2 onPath(float s) {
-    float k = floor(s);
-    return mix(waypoint(k), waypoint(k + 1.0), s - k);
-}
-
-// Integral of the polyline's position over [a, b], for b - a < 1: the
-// segments are linear, so each part is a quadratic in the fraction.
-vec2 segmentIntegral(float k, float f0, float f1) {
-    vec2 a = waypoint(k);
-    vec2 b = waypoint(k + 1.0);
-    return a * (f1 - f0) + (b - a) * 0.5 * (f1 * f1 - f0 * f0);
-}
-
-vec2 pathIntegral(float a, float b) {
-    float k = floor(a);
-    if (b <= k + 1.0) return segmentIntegral(k, a - k, b - k);
-    return segmentIntegral(k, a - k, 1.0) + segmentIntegral(k + 1.0, 0.0, b - k - 1.0);
-}
-
-// The path's tangent at arc length s, averaged over a tent of TURN cells
-// centred `ahead` cells further on, unnormalised: shorter in a corner than
-// on a straight. A corner turned this way has no jump in the yaw rate at
-// either end and peaks at about 4 / TURN radians per cell in the middle.
-vec2 tangentAt(float s, float ahead) {
-    vec2 dir = vec2(0.0);
-    for (int k = -2; k <= 2; k++) {
-        float x = s + ahead + float(k) * TURN * 0.2;
-        dir += (3.0 - abs(float(k))) * (onPath(x + TURN * 0.1) - onPath(x - TURN * 0.1));
+// The polyline convolved with a tent of half-width TURN, at arc length s:
+// where the body is and which way it is moving. Segment by segment under
+// the tent, the position is linear and the weight is linear, so both
+// integrals are closed form and cost one waypoint per segment. The tent
+// leaves the position C2 and the tangent C1: the yaw rate never jumps.
+// `dir` is not normalised; it is shorter in a corner than on a straight,
+// and that is how fast the body is going in cells per cell of s.
+void smoothPath(float s, out vec2 pos, out vec2 dir) {
+    pos = vec2(0.0);
+    dir = vec2(0.0);
+    float k0 = floor(s - TURN);
+    float k1 = floor(s + TURN);
+    vec2 w = waypoint(k0);
+    for (float k = k0; k <= k1; k += 1.0) {
+        vec2 wn = waypoint(k + 1.0);
+        vec2 d = wn - w;
+        vec2 at0 = w + d * (s - k);  // the segment's line at tau = 0
+        // tau = sigma - s over the segment, clipped to the tent, and split
+        // at tau = 0 where the tent's slope changes sign.
+        float a = max(k - s, -TURN);
+        float b = min(k + 1.0 - s, TURN);
+        for (int part = 0; part < 2; part++) {
+            float ta = part == 0 ? a : max(a, 0.0);
+            float tb = part == 0 ? min(b, 0.0) : b;
+            if (tb > ta) {
+                float c = part == 0 ? -1.0 / TURN : 1.0 / TURN;  // weight = 1 - c * tau
+                float i1 = tb - ta;
+                float i2 = 0.5 * (tb * tb - ta * ta);
+                float i3 = (tb * tb * tb - ta * ta * ta) / 3.0;
+                pos += at0 * (i1 - c * i2) + d * (i2 - c * i3);
+                dir += d * (i1 - c * i2);
+            }
+        }
+        w = wn;
     }
-    return dir / (9.0 * TURN * 0.2);
-}
-
-// Where the body is at arc length s: the polyline smoothed by the same
-// tent, so that its velocity is exactly tangentAt(s, 0.0). The body then
-// always moves the way it faces, and slows in a corner as the tangent
-// shortens, to about 0.7 of its pace on a right angle.
-vec2 bodyAt(float s) {
-    vec2 p = vec2(0.0);
-    for (int k = -2; k <= 2; k++) {
-        float x = s + float(k) * TURN * 0.2;
-        p += (3.0 - abs(float(k))) * pathIntegral(x - TURN * 0.1, x + TURN * 0.1);
-    }
-    return p / (9.0 * TURN * 0.2);
-}
-
-float headingAt(float s, float ahead) {
-    vec2 dir = tangentAt(s, ahead);
-    return atan(dir.x, dir.y);
-}
-
-// Turning rate of the body, in radians per cell, at arc length s.
-float turnRate(float s) {
-    float d = headingAt(s + 0.05, 0.0) - headingAt(s - 0.05, 0.0);
-    return atan(sin(d), cos(d)) / 0.1;
+    pos /= TURN;
+    dir /= TURN;
 }
 
 // --- the gait -------------------------------------------------------------
@@ -608,19 +599,24 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float strideP = fract(steps * 0.5);
     float stepHz = PACE * walkSpeed();
     float sinceStrike = su / stepHz;
-    float amp = mix(stepSize(stepNo), stepSize(stepNo + 1.0), su) * moving;
 
-    // The body, on the smoothed path, facing the way it moves.
-    vec2 body = bodyAt(s);
-    float heading = headingAt(s, 0.0);
-    float turning = clamp(turnRate(s) / 1.5, -1.0, 1.0);
+    // The body, on the smoothed path, facing the way it moves, and going
+    // slower round a corner.
+    vec2 body, going;
+    smoothPath(s, body, going);
+    float heading = atan(going.x, going.y);
+    float gait = moving * length(going);
     // The head turns on the neck ahead of the body, and with the stride:
     // its heading is read at an arc length warped so that d(warped)/ds =
     // 1 + GATE * sin(2 pi stride), fastest when the sway peaks and slowest
-    // half a stride later.
+    // half a stride later. The neck's angle is also how far into a turn
+    // the body is, for the lean.
     float warped = s - moving * GATE / (3.14159265 * PACE) * cos(6.2831853 * strideP);
-    float neck = headingAt(warped, LEAD) - heading;
+    vec2 unused, facing;
+    smoothPath(warped + LEAD, unused, facing);
+    float neck = atan(facing.x, facing.y) - heading;
     neck = clamp(atan(sin(neck), cos(neck)), -NECK_MAX, NECK_MAX);
+    float turning = clamp(neck / 0.35, -1.0, 1.0);
 
     // Looking around while stood still: into the dark on the first pause,
     // back over the left shoulder, down the room it came through, on the
@@ -630,15 +626,17 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     // The bob: the pendulum's arc with its harmonics, and the strike's ring
     // on top, split into what the eyes counter well and what they do not.
+    // All of it scales with the body's speed, `gait`.
+    float amp = mix(stepSize(stepNo), stepSize(stepNo + 1.0), su) * gait;
     float arch = 1.0 / (1.0 + ARCH2 + ARCH3);
     float bobLow = -BOB * amp * arch * cos(6.2831853 * su);
     float bobHigh = -BOB * amp * arch * (ARCH2 * cos(12.566371 * su) + ARCH3 * cos(18.849556 * su))
-        + IMPACT * moving * ring(sinceStrike, IMPACT_TAU);
+        + IMPACT * gait * ring(sinceStrike, IMPACT_TAU);
     // Sideways once a stride, and into the turn; forwards with the surge.
     float sway = SWAY * amp * sin(6.2831853 * strideP) + LEAN * moving * turning;
-    float surge = RIPPLE * moving * walkSpeed() * CELL / (6.2831853 * stepHz) * sin(6.2831853 * su);
-    float roll = GAIT_ROLL * moving * sin(6.2831853 * strideP);
-    float kick = KICK * moving * ring(sinceStrike, KICK_TAU);
+    float surge = RIPPLE * gait * walkSpeed() * CELL / (6.2831853 * stepHz) * sin(6.2831853 * su);
+    float roll = GAIT_ROLL * gait * sin(6.2831853 * strideP);
+    float kick = KICK * gait * ring(sinceStrike, KICK_TAU);
     vec3 side = vec3(cos(heading), 0.0, -sin(heading));
     vec3 ahead = vec3(sin(heading), 0.0, cos(heading));
 
