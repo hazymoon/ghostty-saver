@@ -52,6 +52,29 @@ const float BAND_SLOT = 10.0;
 const float BAND_CHANCE = 0.2;
 const float BAND_ROLL = 2.0;       // seconds the band takes to roll through
 
+// The tape's colour. VHS records luma as FM, which suppresses noise above
+// its threshold, and colour as AM on a 629 kHz subcarrier, which does not;
+// and it keeps only about 40 colour samples to a line against 333 of
+// luma. So the noise on a tape is coloured before it is grey, and it
+// comes as wide, flat blotches rather than grain; the hue of a line drifts
+// with the tape's speed (yellow swings between green and orange); a fine
+// luma pattern such as the wallpaper's stripes is mistaken for colour
+// (cross-colour, the rainbow on a striped shirt); and colour leaks back
+// into luma as the dots that crawl along a saturated edge. The tracking
+// band itself is grey, luma FM falling below its threshold, and colour
+// only tears at its edges.
+const float LUMA_SAMPLES = 333.0;  // luma samples to a line
+const float CHROMA_SAMPLES = 40.0; // colour samples to a line
+const float LINES = 480.0;         // lines to the picture
+const float CHROMA_NOISE = 0.04;   // in I/Q, where the yellow walls are about 0.17
+const float LUMA_GRAIN = 0.06;     // fine grain in Y
+const float LUMA_SNOW = 0.018;     // sparse impulses in Y
+const float PHASE_ERROR = 0.14;    // radians the hue of a line drifts by
+const float CROSS_COLOR = 0.8;     // colour made from a horizontal luma slope
+const float DOT_CRAWL = 0.18;      // luma made from colour at the subcarrier
+const float SUBCARRIER = 0.125;    // cycles per pixel
+const float YC_DELAY = 6.0;        // pixels the colour lags the luma by
+
 // The walk is slow: 30 cells in what is left of a 150 s lap after two
 // pauses is 0.90 m/s, the pace of someone who does not know the place,
 // against the 1.3 m/s of a commuter.
@@ -567,6 +590,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = (inFrame - 0.5 * frame) / frame.y;
     float screenY = 1.0 - inFrame.y / frame.y;
 #else
+    vec2 frame = res;
+    vec2 inFrame = fragCoord;
     vec2 uv = (fragCoord - 0.5 * res) / res.y;
     float screenY = 1.0 - fragCoord.y / res.y;
 #endif
@@ -574,10 +599,16 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     // Tape faults that displace whole scan lines are applied here, to the
     // ray, so the picture really shifts rather than a copy of it.
+    // The frame number restarts every hour and is folded to [0, 100)
+    // before it seeds anything: fed straight in, it reaches the millions
+    // overnight, and sin() of its multiples loses enough precision on the
+    // GPU to bias the hash, which tints the whole picture.
+    float frameNo = floor(mod(iTime, 3600.0) * 60.0);
+    vec2 fseed = vec2(hash11(frameNo + 0.31), hash11(frameNo + 0.77)) * 100.0;
     float band = trackingBand(screenY, iTime);
-    float bandShift = band * (0.05 + 0.04 * hash11(floor(screenY * 90.0) + floor(iTime * 30.0)));
+    float bandShift = band * (0.05 + 0.04 * hash11(floor(screenY * 90.0) + fseed.x));
     float headSwitch = 1.0 - smoothstep(0.0, 0.03, screenY);
-    float headShift = headSwitch * 0.03 * (hash11(floor(iTime * 60.0)) - 0.5);
+    float headShift = headSwitch * 0.03 * (fseed.y * 0.01 - 0.5);
     float wobble = 0.0012 * sin(screenY * 37.0 + iTime * 21.0) * (0.5 + 0.5 * sin(iTime * 0.7));
     uv.x += bandShift + headShift + wobble;
 
@@ -670,9 +701,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float fog = exp(-dist * 0.075);
     col = mix(FOG_COLOR, col, fog);
 
-    // --- the tape ----------------------------------------------------------
-    // Two colour faults, both from the derivative of the scene. Every pixel
-    // reaches this line.
+    // --- the camera's optics and electronics ------------------------------
+    // Everything from here on runs for every pixel: the faults below are
+    // derivatives of the scene, and a derivative taken after a skip draws
+    // differently on different GPUs.
     //
     // The lens's lateral chromatic aberration: red and blue land either side
     // of green by an amount that grows with the image height, so the middle
@@ -680,13 +712,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 dcol = dFdx(col);
     float fringe = 3.5 * r2;
     col = vec3(col.r + dcol.r * fringe, col.g, col.b - dcol.b * fringe);
-    // The tape's chroma: recorded at a fraction of the luma bandwidth, so
-    // colour lags the edges it belongs to by several pixels to the right.
-    const vec3 LUMA = vec3(0.3, 0.59, 0.11);
-    float luma = dot(col, LUMA);
-    vec3 chroma = col - luma;
-    vec3 dchroma = dcol - dot(dcol, LUMA);
-    col = luma + chroma + dchroma * 6.0;
     col = max(col, 0.0);
 
     // The camcorder's white balance is wrong: it warms everything, lifts the
@@ -696,18 +721,59 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     col = mix(vec3(dot(col, vec3(0.3, 0.59, 0.11))), col, 0.9);
     col = col * 0.9 + 0.02;
 
-    // Tape noise: grain, the torn bright tracking band, snow at the head
-    // switch, scan lines, and the vignette. The grain is fixed to the
-    // screen, and so are the vignette and the black bars: they are the one
+    // --- the tape ----------------------------------------------------------
+    // In Y/C, because every fault of the tape is a failure to keep luma and
+    // colour apart; see the note at LUMA_SAMPLES. Noise is fixed to the
+    // screen, as are the vignette and the black bars: they are the one
     // thing in the picture that does not move, which is part of what makes
     // the walk bearable. There is no flicker in the level: a whole-screen
     // flicker at tens of hertz is a strobe, whatever the tape did.
-    float grain = hash21(floor(fragCoord / 1.5) + fract(iTime * 7.0) * 100.0);
-    col += (grain - 0.5) * 0.09;
-    float bandNoise = hash21(vec2(floor(screenY * 240.0), floor(iTime * 30.0)));
-    col = mix(col, vec3(0.7 + 0.3 * bandNoise), band * 0.8);
-    float snow = hash21(fragCoord + fract(iTime * 13.0) * 50.0);
-    col = mix(col, vec3(snow * 0.6), headSwitch * 0.9);
+    const mat3 RGB2YIQ = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
+    const mat3 YIQ2RGB = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.619, -0.647, 1.703);
+    vec3 yiq = RGB2YIQ * col;
+    vec3 dyiq = RGB2YIQ * dFdx(col);
+    float Y = yiq.x;
+    vec2 C = yiq.yz;
+    float line = floor(inFrame.y / frame.y * LINES);
+    vec2 lumaCell = floor(inFrame / frame * vec2(LUMA_SAMPLES, LINES));
+    vec2 chromaCell = floor(inFrame / frame * vec2(CHROMA_SAMPLES, LINES * 0.5));
+    float bandEdge = band * (1.0 - band) * 4.0;
+
+    // Colour was recorded at a fraction of the luma bandwidth, so it lags
+    // the edges it belongs to by several pixels to the right.
+    C += dyiq.yz * YC_DELAY;
+    // The hue of each line drifts with the tape, and tears at the band.
+    float phase = PHASE_ERROR * (hash21(vec2(line, fseed.x)) - 0.5) * 2.0 + bandEdge * 1.2;
+    C = mat2(cos(phase), sin(phase), -sin(phase), cos(phase)) * C;
+    // Colour noise: wide flat blotches, two lines tall; lost inside the
+    // band and worst at its edges.
+    vec2 blotch = vec2(hash21(chromaCell + fseed), hash21(chromaCell + fseed.yx + 7.0)) * 2.0 - 1.0;
+    C *= 1.0 - band * 0.85;
+    C += blotch * (CHROMA_NOISE + bandEdge * 0.35);
+    // Cross-colour: a horizontal luma slope near the subcarrier's frequency
+    // is demodulated as colour, and the subcarrier's phase turns by a
+    // quarter cycle a pixel, half a cycle a line, half a cycle a frame.
+    float sub = 6.2831853 * inFrame.x * SUBCARRIER + 3.14159265 * (line + frameNo);
+    vec2 carrier = vec2(cos(sub), sin(sub));
+    C += carrier * clamp(dyiq.x * 0.5, -0.06, 0.06) * CROSS_COLOR;
+    // Dot crawl: colour at the subcarrier leaks back into luma, where the
+    // colour changes; a flat wall stays clean.
+    float crawlEdge = clamp(length(dyiq.yz) * 20.0, 0.0, 1.0);
+    Y += dot(C, carrier) * DOT_CRAWL * crawlEdge;
+
+    // Luma noise: fine grain, sparse snow that widens to a streak, the
+    // torn bright tracking band, and snow at the head switch, both grey.
+    float grain = hash21(floor(fragCoord / 2.5) + fract(iTime * 7.0) * 100.0);
+    float snow = step(0.93, hash21(lumaCell + fseed + 3.0)) - step(0.93, hash21(lumaCell + fseed.yx + 5.0));
+    Y += (grain - 0.5) * LUMA_GRAIN + snow * (LUMA_SNOW + band * 0.55);
+    float bandNoise = hash21(vec2(floor(screenY * 240.0), fseed.y));
+    Y = mix(Y, 0.7 + 0.3 * bandNoise, band * 0.8);
+    float headSnow = hash21(fragCoord + fract(iTime * 13.0) * 50.0);
+    Y = mix(Y, headSnow * 0.6, headSwitch * 0.9);
+    C *= 1.0 - headSwitch;
+    col = YIQ2RGB * vec3(Y, C);
+
+    // --- the monitor --------------------------------------------------------
     col *= 0.9 + 0.1 * sin(fragCoord.y * 3.14159 * 0.5);
     col *= 1.0 - 0.3 * r2;
 
