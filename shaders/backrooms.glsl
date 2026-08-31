@@ -36,7 +36,8 @@ const float PILLAR = 0.19;         // half width of a corner pillar
 const float WALL_HALF = 0.06;      // half thickness of a partition wall
 const float WALL_DENSITY = 0.42;   // fraction of edges that carry a wall
 const float LIGHT_DENSITY = 0.72;  // fraction of cells with a working tube
-const int MAX_CELLS = 40;          // DDA steps before a ray gives up in fog
+const int MAX_CELLS = 24;          // DDA steps before a ray gives up in fog: 96 m,
+                                   // where the fog leaves under 0.1 % of the scene
 
 // How often things happen. A bad tube has a fit with probability
 // FIT_CHANCE in every FIT_SLOT seconds; the deck drops a frame with
@@ -200,6 +201,22 @@ const int OPEN_SIDES[64] = int[64](
      0, 10,  0,  0, 10, 10,  0,  0
 );
 
+// A hash without a sin(), on whole numbers (pcg2d). The walls and the
+// tubes are placed by it, and so are the stains, the grain and the tape's
+// faults: the walls are looked up a dozen times a pixel and the tubes
+// nine, and the shared sin() hash was a measurable part of the frame.
+// The tape's rarer events keep hash11.
+float cheap21(vec2 p) {
+    uvec2 v = uvec2(ivec2(p)) * 1664525u + 1013904223u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    return float((v.x ^ v.y) & 0x00ffffffu) / 16777216.0;
+}
+
 // The dark corner: cells x in [5, 8) and z in [3, 6) of every tile have no
 // working light. The walk runs up its west edge, x = 4, and the first pause
 // is there, looking in.
@@ -340,14 +357,14 @@ bool sideOpen(vec2 cell, int bit) {
 // Whether the edge on the +x side (axisX) or +z side of `cell` carries a
 // wall, and which part of it: 0 none, 1 the whole edge, 2 the low half,
 // 3 the high half. Half walls are what make the rooms read as rooms and not
-// as a grid of corridors.
+// as a grid of corridors. One hash decides both: below WALL_DENSITY there
+// is a wall, and where below says which part.
 int wallOn(vec2 cell, bool axisX) {
     if (sideOpen(cell, axisX ? 1 : 2)) return 0;
     vec2 c = mod(cell, SUPER);
-    vec2 key = c + (axisX ? vec2(0.37, 0.61) : vec2(0.83, 0.19));
-    float h = hash21(key);
+    float h = cheap21(vec2(c.x * 2.0 + (axisX ? 1.0 : 0.0), c.y));
     if (h > WALL_DENSITY) return 0;
-    float kind = hash21(key + 5.0);
+    float kind = h / WALL_DENSITY;
     return kind < 0.5 ? 1 : (kind < 0.75 ? 2 : 3);
 }
 
@@ -474,10 +491,16 @@ float trace(vec3 ro, vec3 rd, out int id, out vec3 normal) {
 
 // --- light and surfaces ---------------------------------------------------
 
+// The hash that places the tubes: below LIGHT_DENSITY there is one, and
+// how far below says whether it has gone bad. One hash for both, because
+// tubeLevel runs for nine cells a pixel.
+float tubeHash(vec2 cell) {
+    return cheap21(mod(cell, SUPER) + vec2(32.0, 0.0));
+}
+
 // Whether `cell` has a working tube: not in the blackout, and on the hash.
 bool hasTube(vec2 cell) {
-    if (inBlackout(cell)) return false;
-    return hash21(mod(cell, SUPER) + vec2(0.11, 0.73)) <= LIGHT_DENSITY;
+    return !inBlackout(cell) && tubeHash(cell) <= LIGHT_DENSITY;
 }
 
 // Brightness of the tube in `cell` at scene time t: 0 for a cell without
@@ -488,10 +511,12 @@ bool hasTube(vec2 cell) {
 // moment or, more often, none is. Tubes that stutter all the time make the
 // whole scene restless, and a watcher is meant to be able to rest here.
 float tubeLevel(vec2 cell, float t) {
-    if (!hasTube(cell)) return 0.0;
-    vec2 c = mod(cell, SUPER);
-    float bad = hash21(c + vec2(0.57, 0.29));
+    if (inBlackout(cell)) return 0.0;
+    float h = tubeHash(cell);
+    if (h > LIGHT_DENSITY) return 0.0;
+    float bad = h / LIGHT_DENSITY;
     if (bad > 0.22) return 1.0;
+    vec2 c = mod(cell, SUPER);
     float tt = t + bad * 100.0;  // so the bad tubes' slots are out of step
     float slot = floor(tt / FIT_SLOT);
     float seed = c.x * 7.0 + c.y * 13.0;
@@ -507,55 +532,28 @@ vec2 tubeCentre(vec2 cell) {
     return (cell + 0.5) * CELL;
 }
 
-// Whether light from l reaches p on the floor plan: a walk over the cell
-// boundaries the segment crosses, stopped by a wall that covers the
-// crossing. Pillars are ignored; they are thin and the light is broad.
-bool litFrom(vec2 p, vec2 l) {
-    vec2 d = l - p;
-    vec2 cell = floor(p / CELL);
-    vec2 target = floor(l / CELL);
-    vec2 step = sign(d);
-    vec2 inv = 1.0 / vec2(d.x == 0.0 ? 1e-6 : d.x, d.y == 0.0 ? 1e-6 : d.y);
-    vec2 next = ((cell + max(step, 0.0)) * CELL - p) * inv;
-    vec2 delta = abs(CELL * inv);
-    for (int i = 0; i < 4; i++) {
-        if (all(equal(cell, target))) return true;
-        bool axisX = next.x < next.y;
-        float u = axisX ? next.x : next.y;
-        if (u > 1.0) return true;
-        vec2 q = p + d * u;
-        int kind;
-        float along;
-        if (axisX) {
-            kind = wallOn(step.x > 0.0 ? cell : cell - vec2(1.0, 0.0), true);
-            along = fract(q.y / CELL);
-            cell.x += step.x;
-            next.x += delta.x;
-        } else {
-            kind = wallOn(step.y > 0.0 ? cell : cell - vec2(0.0, 1.0), false);
-            along = fract(q.x / CELL);
-            cell.y += step.y;
-            next.y += delta.y;
-        }
-        if (wallCovers(kind, along)) return false;
-    }
-    return true;
-}
-
 // Light arriving at p with normal n from the tubes in the surrounding cells:
-// direct light from the tubes that have a clear line to p across the walls,
-// from the cells within two steps of p's on the floor plan, and a share
-// that bounced off everything else, which is what keeps the ceiling from
-// going black when the tubes hang level with it, and what light the walls'
-// shadows have.
+// direct light from the tubes of p's own cell and the eight around it that
+// have a clear line to p across the walls, and a share that bounced off
+// everything else, which is what keeps the ceiling from going black when
+// the tubes hang level with it, and what light the walls' shadows have.
+//
+// The line of sight is tested against the first wall it would cross, one
+// of the four edges of p's own cell, which is exact for the four cells
+// beside it; a tube on the diagonal is tested against that crossing only.
+// Nothing here loops or diverges: a walk over the boundaries, however
+// short, cost a third of the frame, and each tube costs about a
+// twentieth, which is why the ring two cells out is not lit at all.
 vec3 lighting(vec3 p, vec3 n, float t) {
     vec2 from = p.xz + n.xz * 0.05;  // off its own wall
     vec2 cell = floor(from / CELL);
+    // The walls on this cell's edges, -x, +x, -z, +z.
+    ivec4 own = ivec4(wallOn(cell - vec2(1.0, 0.0), true), wallOn(cell, true),
+                      wallOn(cell - vec2(0.0, 1.0), false), wallOn(cell, false));
     float direct = 0.0;
     float bounced = 0.0;
-    for (int dz = -2; dz <= 2; dz++) {
-        for (int dx = -2; dx <= 2; dx++) {
-            if (abs(dx) + abs(dz) > 2) continue;
+    for (int dz = -1; dz <= 1; dz++) {
+        for (int dx = -1; dx <= 1; dx++) {
             vec2 c = cell + vec2(float(dx), float(dz));
             float level = tubeLevel(c, t);
             if (level == 0.0) continue;
@@ -564,12 +562,23 @@ vec3 lighting(vec3 p, vec3 n, float t) {
             float d2 = dot(l, l);
             bounced += level * 0.5 / (1.0 + d2 * 0.3);
             float lambert = max(dot(n, l * inversesqrt(d2)), 0.0);
-            if (lambert == 0.0 || !litFrom(from, lp.xz)) continue;
+            if (lambert == 0.0) continue;
+            if (dx != 0 || dz != 0) {
+                vec2 d = lp.xz - from;
+                vec2 edge = (cell + vec2(dx > 0 ? 1.0 : 0.0, dz > 0 ? 1.0 : 0.0)) * CELL;
+                float ux = dx != 0 ? (edge.x - from.x) / d.x : 2.0;
+                float uz = dz != 0 ? (edge.y - from.y) / d.y : 2.0;
+                bool firstX = ux < uz;
+                vec2 q = from + d * min(ux, uz);
+                int kind = firstX ? (dx > 0 ? own.y : own.x) : (dz > 0 ? own.w : own.z);
+                if (wallCovers(kind, fract((firstX ? q.y : q.x) / CELL))) continue;
+            }
             direct += level * lambert * 4.5 / (1.0 + d2 * 0.55);
         }
     }
     return (direct + bounced) * TUBE_COLOR;
 }
+
 
 // Value noise, for the stains on everything.
 float noise(vec2 p) {
@@ -577,8 +586,8 @@ float noise(vec2 p) {
     vec2 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
     return mix(
-        mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),
-        mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x),
+        mix(cheap21(i), cheap21(i + vec2(1.0, 0.0)), f.x),
+        mix(cheap21(i + vec2(0.0, 1.0)), cheap21(i + vec2(1.0, 1.0)), f.x),
         f.y
     );
 }
@@ -675,7 +684,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // overnight, and sin() of its multiples loses enough precision on the
     // GPU to bias the hash, which tints the whole picture.
     float frameNo = floor(mod(iTime, 3600.0) * 60.0);
-    vec2 fseed = vec2(hash11(frameNo + 0.31), hash11(frameNo + 0.77)) * 100.0;
+    vec2 fseed = floor(vec2(hash11(frameNo + 0.31), hash11(frameNo + 0.77)) * 100.0);
     float band = trackingBand(screenY, iTime);
     float bandShift = band * (0.05 + 0.04 * hash11(floor(screenY * 90.0) + fseed.x));
     float headSwitch = 1.0 - smoothstep(0.0, 0.03, screenY);
@@ -814,11 +823,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // the edges it belongs to by several pixels to the right.
     C += dyiq.yz * YC_DELAY;
     // The hue of each line drifts with the tape, and tears at the band.
-    float phase = PHASE_ERROR * (hash21(vec2(line, fseed.x)) - 0.5) * 2.0 + bandEdge * 1.2;
+    float phase = PHASE_ERROR * (cheap21(vec2(line, fseed.x)) - 0.5) * 2.0 + bandEdge * 1.2;
     C = mat2(cos(phase), sin(phase), -sin(phase), cos(phase)) * C;
     // Colour noise: wide flat blotches, two lines tall; lost inside the
     // band and worst at its edges.
-    vec2 blotch = vec2(hash21(chromaCell + fseed), hash21(chromaCell + fseed.yx + 7.0)) * 2.0 - 1.0;
+    vec2 blotch = vec2(cheap21(chromaCell + fseed), cheap21(chromaCell + fseed.yx + 7.0)) * 2.0 - 1.0;
     C *= 1.0 - band * 0.85;
     C += blotch * (CHROMA_NOISE + bandEdge * 0.35);
     // Cross-colour: a horizontal luma slope near the subcarrier's frequency
@@ -834,12 +843,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     // Luma noise: fine grain, sparse snow that widens to a streak, the
     // torn bright tracking band, and snow at the head switch, both grey.
-    float grain = hash21(floor(fragCoord / 2.5) + fract(iTime * 7.0) * 100.0);
-    float snow = step(0.93, hash21(lumaCell + fseed + 3.0)) - step(0.93, hash21(lumaCell + fseed.yx + 5.0));
+    float grain = cheap21(floor(fragCoord / 2.5) + floor(fract(iTime * 7.0) * 100.0));
+    float snow = step(0.93, cheap21(lumaCell + fseed + 3.0)) - step(0.93, cheap21(lumaCell + fseed.yx + 5.0));
     Y += (grain - 0.5) * LUMA_GRAIN + snow * (LUMA_SNOW + band * 0.55);
-    float bandNoise = hash21(vec2(floor(screenY * 240.0), fseed.y));
+    float bandNoise = cheap21(vec2(floor(screenY * 240.0), fseed.y));
     Y = mix(Y, 0.7 + 0.3 * bandNoise, band * 0.8);
-    float headSnow = hash21(fragCoord + fract(iTime * 13.0) * 50.0);
+    float headSnow = cheap21(floor(fragCoord) + floor(fract(iTime * 13.0) * 50.0));
     Y = mix(Y, headSnow * 0.6, headSwitch * 0.9);
     C *= 1.0 - headSwitch;
     col = YIQ2RGB * vec3(Y, C);
