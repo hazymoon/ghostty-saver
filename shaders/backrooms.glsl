@@ -537,6 +537,9 @@ vec2 tubeCentre(vec2 cell) {
 // have a clear line to p across the walls, and a share that bounced off
 // everything else, which is what keeps the ceiling from going black when
 // the tubes hang level with it, and what light the walls' shadows have.
+// The bounced share is set so the picture averages about nine tenths as
+// bright as it was before the shadows and the ring of tubes two cells
+// out went; the blackout, which no tube reaches, stays as dark.
 //
 // The line of sight is tested against the first wall it would cross, one
 // of the four edges of p's own cell, which is exact for the four cells
@@ -560,7 +563,7 @@ vec3 lighting(vec3 p, vec3 n, float t) {
             vec3 lp = vec3(tubeCentre(c).x, CEILING - 0.05, tubeCentre(c).y);
             vec3 l = lp - p;
             float d2 = dot(l, l);
-            bounced += level * 0.5 / (1.0 + d2 * 0.3);
+            bounced += level * 0.75 / (1.0 + d2 * 0.3);
             float lambert = max(dot(n, l * inversesqrt(d2)), 0.0);
             if (lambert == 0.0) continue;
             if (dx != 0 || dz != 0) {
