@@ -85,7 +85,13 @@ const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 // - Roll is a fraction of a degree with each stride, and never on a turn.
 //   Leaning into a turn is a lateral shift of LEAN instead.
 // - Turns are spread over TURN cells of the path so the yaw rate stays
-//   under about 30 degrees a second, and the looks in the pauses under 60.
+//   under about 40 degrees a second, and the looks in the pauses under 60.
+//   The body walks the same smoothed path that its heading is read from,
+//   so it always moves the way it faces and slows into a corner, on a
+//   radius of about 1.5 m; and the head turns on the neck, NECK metres
+//   behind the eyes, so turning the head moves the eyes sideways and the
+//   picture parallaxes as well as rotates. Without both, a turn is a tank
+//   pivoting on the spot.
 //
 // And a person's gait is not a metronome, or a sine wave. The steps are
 // uneven (JITTER, ASYM, STEP_JITTER), the rise of each is the arc of an
@@ -101,9 +107,10 @@ const float GAIT_ROLL = 0.007;     // radians, once a stride
 const float GAZE = 6.0;            // metres ahead, where the eyes fix
 const float VOR_STEP = 0.75;       // share of the step's fundamental the eyes counter
 const float VOR_HIGH = 0.5;        // share of the harmonics and the strike
-const float TURN = 1.5;            // cells over which a corner is turned
-const float CORNER = 0.4;          // cells either side of a corner the path cuts
+const float TURN = 1.8;            // cells over which a corner is turned
 const float LEAD = 0.25;           // cells the head looks ahead of the body
+const float NECK = 0.10;           // metres from the neck's axis forward to the eyes
+const float NECK_MAX = 0.73;       // radians the head turns on the neck, at most
 const float LEAN = 0.025;          // metres shifted into a turn
 const float GATE = 0.65;           // depth of the stride's modulation of the yaw rate
 const float ARCH2 = 0.20;          // second and third harmonics of the bob
@@ -215,35 +222,67 @@ float lookBump(float u, float start) {
          - smoothstep(start + PAUSE * 0.55, start + PAUSE - 0.2, u);
 }
 
-// Position on the polyline at arc length s (cells), in cells. Laps beyond
-// the first move the whole tile north.
-vec2 onPath(float s) {
-    float lap = floor(s / float(STEPS));
-    float local = s - lap * float(STEPS);
-    int k = int(floor(local));
-    float f = local - float(k);
-    vec2 a = WAYPOINT[k];
-    vec2 b = WAYPOINT[k + 1];
-    return mix(a, b, f) + vec2(0.0, lap * SUPER);
+// Waypoint k of the walk, for any k: laps beyond the first move the whole
+// tile north.
+vec2 waypoint(float k) {
+    float lap = floor(k / float(STEPS));
+    return WAYPOINT[int(k - lap * float(STEPS))] + vec2(0.0, lap * SUPER);
 }
 
-// Where the head faces at arc length s: the path's tangent, averaged over
-// a tent of TURN cells centred LEAD cells ahead, since the head turns into
-// a corner before the body reaches it. A corner turned this way has no
-// jump in the yaw rate at either end and peaks at about 4 / TURN radians
-// per cell in the middle, 30 degrees a second at the walking speed.
-float headingAt(float s) {
+// Position on the polyline at arc length s (cells), in cells.
+vec2 onPath(float s) {
+    float k = floor(s);
+    return mix(waypoint(k), waypoint(k + 1.0), s - k);
+}
+
+// Integral of the polyline's position over [a, b], for b - a < 1: the
+// segments are linear, so each part is a quadratic in the fraction.
+vec2 segmentIntegral(float k, float f0, float f1) {
+    vec2 a = waypoint(k);
+    vec2 b = waypoint(k + 1.0);
+    return a * (f1 - f0) + (b - a) * 0.5 * (f1 * f1 - f0 * f0);
+}
+
+vec2 pathIntegral(float a, float b) {
+    float k = floor(a);
+    if (b <= k + 1.0) return segmentIntegral(k, a - k, b - k);
+    return segmentIntegral(k, a - k, 1.0) + segmentIntegral(k + 1.0, 0.0, b - k - 1.0);
+}
+
+// The path's tangent at arc length s, averaged over a tent of TURN cells
+// centred `ahead` cells further on, unnormalised: shorter in a corner than
+// on a straight. A corner turned this way has no jump in the yaw rate at
+// either end and peaks at about 4 / TURN radians per cell in the middle.
+vec2 tangentAt(float s, float ahead) {
     vec2 dir = vec2(0.0);
     for (int k = -2; k <= 2; k++) {
-        float x = s + LEAD + float(k) * TURN * 0.2;
+        float x = s + ahead + float(k) * TURN * 0.2;
         dir += (3.0 - abs(float(k))) * (onPath(x + TURN * 0.1) - onPath(x - TURN * 0.1));
     }
+    return dir / (9.0 * TURN * 0.2);
+}
+
+// Where the body is at arc length s: the polyline smoothed by the same
+// tent, so that its velocity is exactly tangentAt(s, 0.0). The body then
+// always moves the way it faces, and slows in a corner as the tangent
+// shortens, to about 0.7 of its pace on a right angle.
+vec2 bodyAt(float s) {
+    vec2 p = vec2(0.0);
+    for (int k = -2; k <= 2; k++) {
+        float x = s + float(k) * TURN * 0.2;
+        p += (3.0 - abs(float(k))) * pathIntegral(x - TURN * 0.1, x + TURN * 0.1);
+    }
+    return p / (9.0 * TURN * 0.2);
+}
+
+float headingAt(float s, float ahead) {
+    vec2 dir = tangentAt(s, ahead);
     return atan(dir.x, dir.y);
 }
 
-// Turning rate of the head, in radians per cell, at arc length s.
+// Turning rate of the body, in radians per cell, at arc length s.
 float turnRate(float s) {
-    float d = headingAt(s + 0.05) - headingAt(s - 0.05);
+    float d = headingAt(s + 0.05, 0.0) - headingAt(s - 0.05, 0.0);
     return atan(sin(d), cos(d)) / 0.1;
 }
 
@@ -571,20 +610,23 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float sinceStrike = su / stepHz;
     float amp = mix(stepSize(stepNo), stepSize(stepNo + 1.0), su) * moving;
 
-    // Rounded corners: the average of a point behind and a point ahead.
-    vec2 pos2 = 0.5 * (onPath(s - CORNER) + onPath(s + CORNER));
-    // The head turns with the stride: its heading is read at an arc length
-    // warped so that d(warped)/ds = 1 + GATE * sin(2 pi stride), fastest
-    // when the sway peaks and slowest half a stride later.
+    // The body, on the smoothed path, facing the way it moves.
+    vec2 body = bodyAt(s);
+    float heading = headingAt(s, 0.0);
+    float turning = clamp(turnRate(s) / 1.5, -1.0, 1.0);
+    // The head turns on the neck ahead of the body, and with the stride:
+    // its heading is read at an arc length warped so that d(warped)/ds =
+    // 1 + GATE * sin(2 pi stride), fastest when the sway peaks and slowest
+    // half a stride later.
     float warped = s - moving * GATE / (3.14159265 * PACE) * cos(6.2831853 * strideP);
-    float heading = headingAt(warped);
-    float turning = clamp(turnRate(warped) / 1.5, -1.0, 1.0);
+    float neck = headingAt(warped, LEAD) - heading;
+    neck = clamp(atan(sin(neck), cos(neck)), -NECK_MAX, NECK_MAX);
 
     // Looking around while stood still: into the dark on the first pause,
     // back over the left shoulder, down the room it came through, on the
     // second.
     float look = 1.6 * lookBump(u, PAUSE1) - 1.8 * lookBump(u, PAUSE2);
-    float yaw = heading + look;
+    float yaw = heading + neck + look;
 
     // The bob: the pendulum's arc with its harmonics, and the strike's ring
     // on top, split into what the eyes counter well and what they do not.
@@ -600,12 +642,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 side = vec3(cos(heading), 0.0, -sin(heading));
     vec3 ahead = vec3(sin(heading), 0.0, cos(heading));
 
-    // The head without the bob, and the eyes' target ahead of it, level
-    // with it: the walker looks down the room, not at the floor, and the
+    // The eyes without the bob, NECK ahead of the neck's axis in the
+    // direction the head faces, and their target ahead of them, level
+    // with them: the walker looks down the room, not at the floor, and the
     // barrel distortion already pulls the floor up into view. The ray
     // starts at the bobbed eye; its direction is what the eyes think they
     // are countering, from `known`.
-    vec3 head = vec3(pos2.x * CELL + CELL * 0.5, EYE, pos2.y * CELL + CELL * 0.5);
+    vec3 head = vec3(body.x * CELL + CELL * 0.5, EYE, body.y * CELL + CELL * 0.5)
+        + NECK * vec3(sin(yaw), 0.0, cos(yaw));
     vec3 shift = side * sway + ahead * surge;
     vec3 ro = head + shift + vec3(0.0, bobLow + bobHigh, 0.0);
     vec3 known = head + shift + vec3(0.0, VOR_STEP * bobLow + VOR_HIGH * bobHigh, 0.0);
