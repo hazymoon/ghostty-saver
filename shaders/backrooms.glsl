@@ -112,7 +112,7 @@ const float COMB = 0.5;            // of a field the older lines lag by
 // of someone who does not know the place, against the 1.3 m/s of a
 // commuter - and 0.54 m/s where it creeps, which is barely walking.
 const float LAP = 150.0;           // seconds per lap of the walk
-const float PAUSE = 10.0;          // seconds the camera stands still, twice a lap
+const float PAUSE = 10.0;          // seconds of the two pauses the walk is planned round
 const float EASE = 2.0;            // seconds to slow into and out of a pause
 const float PAUSE1 = 30.0;         // lap seconds at which each pause begins:
 const float PAUSE2 = 106.0;        // on the blackout's edge, and on the way back
@@ -137,15 +137,26 @@ const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 // Whatever they cost between them comes back as speed everywhere else:
 // walkSpeed divides by what is left of the lap, so a lap is always STEPS
 // cells however much of it is spent going slowly.
+// The third stop is not planned at all. It is three seconds, it stops the
+// walk in six tenths rather than two seconds, and nothing in the picture
+// says why: the walker has heard something, and the tape does not record
+// what. It is on the way back, in the middle of a straight, well clear of
+// the pauses - the depths add - and it is not tied to any of the tape's
+// faults or the tubes' fits, which are hashed on absolute time and would
+// line up with it on one lap in a hundred and never again.
 const float CREEP = 0.45;          // how much of the pace the creep takes off
-const float CREEP_IN = 7.9;        // seconds of it before the pause: from where
+const float CREEP_IN = 8.27;       // seconds of it before the pause: from where
                                    // the blackout's first doorway comes into view
-const float CREEP_OUT = 16.8;      // and after it: past the last of the doorways
-const vec4 HOLDING_BACK[4] = vec4[4](
+const float CREEP_OUT = 15.90;     // and after it: past the last of the doorways
+const float FREEZE_AT = 130.3;     // lap second the walk stops dead
+const float FREEZE = 3.0;          // for this long
+const float FREEZE_EASE = 0.6;     // and this is all the warning it gives
+const vec4 HOLDING_BACK[5] = vec4[5](
     vec4(PAUSE1, PAUSE, EASE, 1.0),
     vec4(PAUSE2, PAUSE, EASE, 1.0),
     vec4(PAUSE1 - CREEP_IN, CREEP_IN + EASE, EASE, CREEP),
-    vec4(PAUSE1 + PAUSE - EASE, CREEP_OUT + EASE, EASE, CREEP)
+    vec4(PAUSE1 + PAUSE - EASE, CREEP_OUT + EASE, EASE, CREEP),
+    vec4(FREEZE_AT, FREEZE, FREEZE_EASE, 1.0)
 );
 
 // The camera is held by a person, and a person's head is steadier than the
@@ -171,7 +182,8 @@ const vec4 HOLDING_BACK[4] = vec4[4](
 //   Leaning into a turn is a lateral shift of LEAN instead.
 // - Turns are spread over a tent of TURN cells either side of the path's
 //   corner, so the yaw rate is continuous and stays under about 30
-//   degrees a second, and the looks in the pauses under 60.
+//   degrees a second, and the looks, taken at a pause or on the move,
+//   under 60.
 //   The body walks the same smoothed path that its heading is read from,
 //   so it always moves the way it faces and slows into a corner, on a
 //   radius of about 2 m; the gait scales with that speed, so it does not
@@ -202,6 +214,21 @@ const float GAZE_HOLD = 1.45;      // radians off the walk's heading the eyes wi
 const float GAZE_KNEE = 6.0;       // how squarely the follow runs out at GAZE_HOLD
 const float GAZE_ON = 2.0;         // seconds the eyes take to find something
 const float GAZE_OFF = 1.6;        // and to come back off it
+
+// The glance back. Not a gaze: a point behind the walker is past where the
+// neck runs out, and its bearing swings through the whole of a turn as the
+// body walks away from it, which is a rate no neck has. It is an angle,
+// like the looks taken at the pauses, and unlike those it is taken on the
+// move - in the middle of the long leg west, clear of both its corners, so
+// that the head's yaw is not compounding with the body's. The turn out is
+// 54 degrees a second and the turn back 41: the doc's ceiling is 60, and
+// the whole point of a glance behind is that it is over before it has
+// begun.
+const float GLANCE = -1.7;         // radians over the left shoulder
+const float GLANCE_AT = 82.27;     // lap second it starts
+const float GLANCE_LEN = 6.0;      // seconds it is anything at all
+const float GLANCE_ON = 1.8;       // of which this is turning to look
+const float GLANCE_OFF = 2.4;      // and this is turning back
 const float VOR_STEP = 0.75;       // share of the step's fundamental the eyes counter
 const float VOR_HIGH = 0.5;        // share of the harmonics and the strike
 
@@ -988,6 +1015,13 @@ Pose cameraPose(float t) {
     // second.
     float look = 1.6 * lookBump(u, PAUSE1) - 1.8 * lookBump(u, PAUSE2);
     float lookRate = 1.6 * lookBumpRate(u, PAUSE1) - 1.8 * lookBumpRate(u, PAUSE2);
+    // And the one look taken while still walking: see GLANCE.
+    float g0 = GLANCE_AT;
+    float g1 = GLANCE_AT + GLANCE_ON;
+    float g2 = GLANCE_AT + GLANCE_LEN - GLANCE_OFF;
+    float g3 = GLANCE_AT + GLANCE_LEN;
+    look += GLANCE * bump(u, g0, g1, g2, g3);
+    lookRate += GLANCE * bumpRate(u, g0, g1, g2, g3);
     // And looking at something while walking past it, which is an angle
     // that has to be worked out rather than set: see GAZE_AT.
     float gazeOff, gazeRate;
