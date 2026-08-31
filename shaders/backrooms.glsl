@@ -89,7 +89,16 @@ const float YC_DELAY = 6.0;        // pixels the colour lags the luma by
 // Each line's scene is traced at its own field's instant, so the comb
 // costs nothing: one trace a pixel either way. Everything on the tape, the
 // noise, the head switch, the subcarrier's phase, ticks by the field too.
+//
+// The comb is drawn smaller than it is. A tape's picture is soft, some
+// 333 luma samples a line, nine pixels at 4K, and the comb a walk puts on
+// a near wall, ten pixels or so, is a wobble in an edge that soft; traced
+// once a pixel, the picture here is sharp, and the same comb is teeth.
+// There is no blurring it without a second trace, so the older lines are
+// drawn COMB of a field back instead of a whole one, which is about what
+// the tape's comb reads as.
 const float FIELD_RATE = 59.94;    // fields a second: NTSC's 60000 / 1001
+const float COMB = 0.5;            // of a field the older lines lag by
 
 // The walk is slow: 30 cells in what is left of a 150 s lap after two
 // pauses is 0.90 m/s, the pace of someone who does not know the place,
@@ -707,7 +716,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float stale = abs(mod(line, 2.0) - mod(fieldNo, 2.0));  // 1 on the older field's lines
     float lineField = fieldNo - stale;
     float now = iTime - (fields - fieldNo) / FIELD_RATE;     // this field's instant
-    float t = droppedFrames(now) - stale / FIELD_RATE;  // a dropped frame holds both fields
+    float t = droppedFrames(now) - COMB * stale / FIELD_RATE;  // a dropped frame holds both fields
     vec2 fseed = floor(vec2(hash11(fieldNo + 0.31), hash11(fieldNo + 0.77)) * 100.0);
 
     // Tape faults that displace whole scan lines are applied here, to the
