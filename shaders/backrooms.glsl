@@ -37,12 +37,54 @@ const float WALL_DENSITY = 0.42;   // fraction of edges that carry a wall
 const float LIGHT_DENSITY = 0.72;  // fraction of cells with a working tube
 const int MAX_CELLS = 40;          // DDA steps before a ray gives up in fog
 
-const float LAP = 120.0;           // seconds per lap of the walk
-const float PAUSE = 6.0;           // seconds the camera stands still, twice a lap
-const float EASE = 1.5;            // seconds to slow into and out of a pause
-const float PAUSE1 = 21.0;         // lap seconds at which each pause begins
-const float PAUSE2 = 78.0;
+// How often things happen. A bad tube has a fit with probability
+// FIT_CHANCE in every FIT_SLOT seconds; the deck drops a frame with
+// probability DROP_CHANCE in every DROP_SLOT seconds; a tracking band rolls
+// with probability BAND_CHANCE in every BAND_SLOT seconds. All of them are
+// rare: the walk should be dull, and a fault is an event.
+const float FIT_SLOT = 10.0;
+const float FIT_CHANCE = 0.15;
+const float FIT_LENGTH = 0.7;      // seconds a fit lasts
+const float DROP_SLOT = 8.0;
+const float DROP_CHANCE = 0.2;
+const float DROP_HOLD = 0.25;      // seconds the picture freezes
+const float BAND_SLOT = 10.0;
+const float BAND_CHANCE = 0.2;
+const float BAND_ROLL = 2.0;       // seconds the band takes to roll through
+
+// The walk is slow: 36 cells in what is left of a 175 s lap after two
+// pauses is 0.91 m/s, the pace of someone who does not know the place,
+// against the 1.3 m/s of a commuter.
+const float LAP = 175.0;           // seconds per lap of the walk
+const float PAUSE = 10.0;          // seconds the camera stands still, twice a lap
+const float EASE = 2.0;            // seconds to slow into and out of a pause
+const float PAUSE1 = 30.0;         // lap seconds at which each pause begins:
+const float PAUSE2 = 113.0;        // on the blackout's edge, and on the way back
 const int STEPS = 36;              // cells walked per lap
+const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
+
+// The camera is held by a person, and a person's head is steadier than the
+// hand-held shake that shaders reach for. Everything below is chosen so
+// that watching for an hour is not like being on a boat:
+//
+// - No motion at all between 0.1 and 0.4 Hz, the band where motion
+//   sickness peaks (Golding 2001; Diels & Howarth 2013). A slow "drift" on
+//   yaw, pitch, roll or position is exactly that band, so there is none.
+// - The footstep bob and sway move the camera's position only, never its
+//   angle: a rotational bob sweeps the whole image and drives vection.
+// - The eyes counter the bob (the vestibulo-ocular reflex): the camera
+//   keeps looking at a point GAZE metres ahead of where the head would be
+//   without the bob, so the far wall stands still and only the near walls
+//   show the step, as parallax.
+// - Roll is a fraction of a degree with each stride, and never on a turn.
+// - Turns are spread over TURN cells of the path so the yaw rate stays
+//   under about 30 degrees a second, and the looks in the pauses under 60.
+const float BOB = 0.025;           // metres, vertical, once a step
+const float SWAY = 0.020;          // metres, lateral, once a stride
+const float GAIT_ROLL = 0.007;     // radians, once a stride
+const float GAZE = 6.0;            // metres ahead, where the eyes fix
+const float TURN = 1.5;            // cells over which a corner is turned
+const float CORNER = 0.4;          // cells either side of a corner the path cuts
 
 // A 1990s camcorder at the wide end of its zoom is not wide: about 45
 // degrees across, 55 to 65 with the wide converter Kane Pixels' footage
@@ -129,11 +171,13 @@ float pace(float u) {
     return 1.0 - p1 - p2;
 }
 
-// A bump that rises over the first part of a pause and falls over the last:
-// how far the camera has turned to look at something before turning back.
+// A bump that rises over the first half of a pause and falls over the
+// second: how far the camera has turned to look at something before
+// turning back. Both halves are long, so the looks peak at about 35
+// degrees a second.
 float lookBump(float u, float start) {
-    return smoothstep(start + 0.3, start + PAUSE * 0.45, u)
-         - smoothstep(start + PAUSE * 0.6, start + PAUSE - 0.2, u);
+    return smoothstep(start + 0.3, start + PAUSE * 0.5, u)
+         - smoothstep(start + PAUSE * 0.55, start + PAUSE - 0.2, u);
 }
 
 // Position on the polyline at arc length s (cells), in cells. Laps beyond
@@ -146,6 +190,19 @@ vec2 onPath(float s) {
     vec2 a = WAYPOINT[k];
     vec2 b = WAYPOINT[k + 1];
     return mix(a, b, f) + vec2(0.0, lap * SUPER);
+}
+
+// Where the camera faces at arc length s: the path's tangent, averaged over
+// a tent of TURN cells centred a little ahead. A corner turned this way has
+// no jump in the yaw rate at either end and peaks at about 4 / TURN radians
+// per cell in the middle, 30 degrees a second at the walking speed.
+float headingAt(float s) {
+    vec2 dir = vec2(0.0);
+    for (int k = -2; k <= 2; k++) {
+        float x = s + 0.2 + float(k) * TURN * 0.2;
+        dir += (3.0 - abs(float(k))) * (onPath(x + TURN * 0.1) - onPath(x - TURN * 0.1));
+    }
+    return atan(dir.x, dir.y);
 }
 
 // --- the maze -------------------------------------------------------------
@@ -266,22 +323,33 @@ float trace(vec3 ro, vec3 rd, out int id, out vec3 normal) {
 
 // --- light and surfaces ---------------------------------------------------
 
-// Brightness of the tube in `cell` at scene time t: 0 for a cell without one
-// or in the blackout, and a nervous flicker on the cells that have gone bad.
+// Whether `cell` has a working tube: not in the blackout, and on the hash.
+bool hasTube(vec2 cell) {
+    if (inBlackout(cell)) return false;
+    return hash21(mod(cell, SUPER) + vec2(0.11, 0.73)) <= LIGHT_DENSITY;
+}
+
+// Brightness of the tube in `cell` at scene time t: 0 for a cell without
+// one, 1 for a good tube, and on the tubes that have gone bad, a fit now
+// and then: under a second of irregular stutter, then steady again. Fits
+// are rare on purpose. A fifth of the tubes are bad and each has a fit
+// about once a minute, so of the handful in view one is stuttering at any
+// moment or, more often, none is. Tubes that stutter all the time make the
+// whole scene restless, and a watcher is meant to be able to rest here.
 float tubeLevel(vec2 cell, float t) {
-    if (inBlackout(cell)) return 0.0;
+    if (!hasTube(cell)) return 0.0;
     vec2 c = mod(cell, SUPER);
-    float h = hash21(c + vec2(0.11, 0.73));
-    if (h > LIGHT_DENSITY) return 0.0;
     float bad = hash21(c + vec2(0.57, 0.29));
-    float level = 1.0;
-    if (bad < 0.22) {
-        // A tube on its way out: mostly on, with drops to a dim buzz.
-        float tick = floor(t * 19.0 + bad * 100.0);
-        float drop = step(0.72, hash11(tick + c.x * 7.0 + c.y * 13.0));
-        level = mix(1.0, 0.25, drop);
-    }
-    return level;
+    if (bad > 0.22) return 1.0;
+    float tt = t + bad * 100.0;  // so the bad tubes' slots are out of step
+    float slot = floor(tt / FIT_SLOT);
+    float seed = c.x * 7.0 + c.y * 13.0;
+    if (hash11(slot * 3.7 + seed) > FIT_CHANCE) return 1.0;
+    float start = hash11(slot * 1.3 + seed + 4.0) * (FIT_SLOT - FIT_LENGTH);
+    float within = tt - slot * FIT_SLOT;
+    float fit = step(start, within) * step(within, start + FIT_LENGTH);
+    float drop = step(0.55, hash11(floor(tt * 16.0) + seed));
+    return mix(1.0, 0.3, fit * drop);
 }
 
 vec2 tubeCentre(vec2 cell) {
@@ -340,7 +408,7 @@ vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
         vec2 cell = floor(p.xz / CELL);
         vec2 local = p.xz - tubeCentre(cell);
         float panel = step(abs(local.x), 0.6) * step(abs(local.y), 0.3);
-        float level = tubeLevel(cell, 0.0) > 0.0 ? 1.0 : 0.0;
+        float level = hasTube(cell) ? 1.0 : 0.0;
         float lit = tubeLevel(cell, t);
         vec3 albedo = CEILING_COLOR * (0.9 + 0.2 * noise(p.xz * 6.0)) * (1.0 - 0.5 * seam);
         // A dead panel is a dark grey box, a live one is where the light is.
@@ -360,23 +428,25 @@ vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
 
 // --- the tape -------------------------------------------------------------
 
-// Scene time, after the deck has dropped a frame: every couple of seconds
-// there is a chance the picture freezes for a quarter second.
+// Scene time, after the deck has dropped a frame: in every DROP_SLOT
+// seconds there is a chance the picture freezes for DROP_HOLD.
 float droppedFrames(float t) {
-    float slot = floor(t / 2.0);
+    float slot = floor(t / DROP_SLOT);
     float h = hash11(slot * 3.1 + 0.7);
-    float start = slot * 2.0 + h * 1.6;
-    float hold = step(h, 0.22) * 0.25;
+    float start = slot * DROP_SLOT + h * (DROP_SLOT - DROP_HOLD);
+    float hold = step(h, DROP_CHANCE) * DROP_HOLD;
     return t - clamp(t - start, 0.0, hold);
 }
 
 // The tracking band: a bright, torn stripe that rolls up the picture now
-// and then. Returns its strength at screen height y (0 at the bottom).
+// and then, for BAND_ROLL seconds at the start of a BAND_SLOT that draws
+// it. Returns its strength at screen height y (0 at the bottom).
 float trackingBand(float y, float t) {
-    float slot = floor(t * 0.5);
+    float slot = floor(t / BAND_SLOT);
+    float within = t - slot * BAND_SLOT;
     float h = hash11(slot * 7.3 + 2.1);
-    float rolling = step(h, 0.16);
-    float centre = fract(h * 13.0 - (t - slot * 2.0) * 0.55);
+    float rolling = step(h, BAND_CHANCE) * step(within, BAND_ROLL);
+    float centre = fract(h * 13.0 - within * 0.55);
     float d = abs(y - centre);
     float width = 0.035 + 0.02 * hash11(slot + 9.0);
     return rolling * (1.0 - smoothstep(width * 0.5, width, d));
@@ -420,35 +490,37 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // --- the camera --------------------------------------------------------
     float u = mod(t, LAP);
     float s = floor(t / LAP) * float(STEPS) + walked(u);
-    vec2 here = onPath(s);
-    // Rounded corners: the average of a point just behind and just ahead.
-    vec2 pos2 = 0.5 * (onPath(s - 0.25) + onPath(s + 0.25));
-    vec2 ahead = onPath(s + 0.6) - onPath(s - 0.1);
-    float heading = atan(ahead.x, ahead.y);
+    // Rounded corners: the average of a point behind and a point ahead.
+    vec2 pos2 = 0.5 * (onPath(s - CORNER) + onPath(s + CORNER));
+    float heading = headingAt(s);
 
     // Looking around while stood still: into the dark on the first pause,
-    // back over the shoulder on the second.
-    float look = 1.6 * lookBump(u, PAUSE1) + 2.7 * lookBump(u, PAUSE2);
-    // Hand-held: slow drift on every axis and a footstep bob that fades out
-    // when the camera stops.
-    float moving = pace(u);
-    float yaw = heading + look
-        + 0.05 * sin(t * 0.9) + 0.03 * sin(t * 2.3 + 1.0);
-    // Level, on average: the walker looks down the room, not at the floor,
-    // and the barrel distortion already pulls the floor up into view.
-    float pitch = 0.03 * sin(t * 0.7 + 2.0) + 0.02 * sin(t * 1.9)
-        + 0.012 * moving * sin(s * 2.0 * 6.2831853 * 2.8);
-    float roll = 0.02 * sin(t * 0.5 + 1.0) + 0.012 * moving * sin(s * 6.2831853 * 2.8);
-    float bob = 0.035 * moving * sin(s * 6.2831853 * 2.8 * 2.0);
-    vec2 side = vec2(cos(heading), -sin(heading));
-    vec2 sway = side * (0.12 * sin(t * 0.43) + 0.06 * moving * sin(s * 6.2831853 * 2.8));
+    // back over the left shoulder, down the room it came through, on the
+    // second.
+    float look = 1.6 * lookBump(u, PAUSE1) - 1.8 * lookBump(u, PAUSE2);
+    float yaw = heading + look;
 
-    vec3 ro = vec3(pos2.x * CELL + CELL * 0.5 + sway.x, EYE + bob, pos2.y * CELL + CELL * 0.5 + sway.y);
+    // The footsteps: a bob once a step and a sway and a slight roll once a
+    // stride, all fading out as the camera stops. Position only; see the
+    // note at BOB for why there is no drift and no rotational bob.
+    float moving = pace(u);
+    float stride = s * PACE * 3.14159265;  // half a turn per footstep
+    float bob = BOB * moving * sin(stride * 2.0);
+    float sway = SWAY * moving * sin(stride);
+    float roll = GAIT_ROLL * moving * sin(stride);
+    vec2 side = vec2(cos(heading), -sin(heading));
+
+    // The head without the bob, and the eyes' target ahead of it, level
+    // with it: the walker looks down the room, not at the floor, and the
+    // barrel distortion already pulls the floor up into view.
+    vec3 head = vec3(pos2.x * CELL + CELL * 0.5, EYE, pos2.y * CELL + CELL * 0.5);
+    vec3 ro = head + vec3(side.x * sway, bob, side.y * sway);
+    vec3 target = head + vec3(sin(yaw), 0.0, cos(yaw)) * GAZE;
+    vec3 forward = normalize(target - ro);
+    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), forward));
+    vec3 up = cross(forward, right);
     vec2 ruv = vec2(uv.x * cos(roll) - uv.y * sin(roll), uv.x * sin(roll) + uv.y * cos(roll));
-    ruv.y += pitch;
-    vec3 forward = vec3(sin(yaw), 0.0, cos(yaw));
-    vec3 right = vec3(cos(yaw), 0.0, -sin(yaw));
-    vec3 rd = normalize(forward * FOCAL + right * ruv.x + vec3(0.0, ruv.y, 0.0));
+    vec3 rd = normalize(forward * FOCAL + right * ruv.x + up * ruv.y);
 
     // --- the scene ---------------------------------------------------------
     int id;
@@ -488,7 +560,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     col = col * 0.9 + 0.02;
 
     // Tape noise: grain, the torn bright tracking band, snow at the head
-    // switch, scan lines, a flicker in the level, and the vignette.
+    // switch, scan lines, and the vignette. The grain is fixed to the
+    // screen, and so are the vignette and the black bars: they are the one
+    // thing in the picture that does not move, which is part of what makes
+    // the walk bearable. There is no flicker in the level: a whole-screen
+    // flicker at tens of hertz is a strobe, whatever the tape did.
     float grain = hash21(floor(fragCoord / 1.5) + fract(iTime * 7.0) * 100.0);
     col += (grain - 0.5) * 0.09;
     float bandNoise = hash21(vec2(floor(screenY * 240.0), floor(iTime * 30.0)));
@@ -496,7 +572,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float snow = hash21(fragCoord + fract(iTime * 13.0) * 50.0);
     col = mix(col, vec3(snow * 0.6), headSwitch * 0.9);
     col *= 0.9 + 0.1 * sin(fragCoord.y * 3.14159 * 0.5);
-    col *= 0.97 + 0.06 * (hash11(floor(iTime * 24.0)) - 0.5);
     col *= 1.0 - 0.3 * r2;
 
     fragColor = vec4(clamp(col, 0.0, 1.0) * mask, 1.0);
