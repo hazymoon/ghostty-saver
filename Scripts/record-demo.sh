@@ -8,7 +8,7 @@
 #   that is not quite what ships, and the whole point of the animation is to
 #   show what ships.
 #
-#   Each shader gets its own palette. Eight of them share nothing: a matrix
+#   Each shader gets its own palette. The clips share nothing: a matrix
 #   green, a sunset, an aurora. One 128 colour table across the lot bands every
 #   gradient in the set, and a GIF is allowed a palette per frame, so there is
 #   no reason to make them share one.
@@ -60,7 +60,6 @@ clips=(
     "mystify 11.0"
     "tunnel 32.0"
     "synthwave 25.0"
-    "toasters 5.0"
     "aurora 62.0"
 )
 

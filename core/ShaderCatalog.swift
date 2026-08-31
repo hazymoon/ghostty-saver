@@ -17,16 +17,34 @@ public enum ShaderCatalog {
     /// kept out of the pool `random` draws from.
     public static let fixtureNames: Set<String> = ["gradient"]
 
+    /// Shaders that are being reworked and are not ready to be shown.
+    ///
+    /// They still compile, still run under their name, and are still tested,
+    /// so the work on them stays in the tree rather than on a branch that
+    /// drifts. But `random` does not draw them and `--list-shaders` does not
+    /// offer them: a screensaver that comes up unasked for has to be one that
+    /// is finished, and a list is a recommendation.
+    public static let draftNames: Set<String> = ["moire", "raindrops", "raster", "toasters"]
+
     /// Ask for this instead of a name to get one of the screensavers at random.
     /// A shader actually called this would win the name, so the keyword can
     /// never shadow a real one.
     public static let randomName = "random"
 
+    /// Everything `--list-shaders` should offer, in catalog order: the
+    /// fixture included, since it is documented and there for anyone checking
+    /// the conversion, but nothing that is still being reworked.
+    public static func listable(in programs: [ShaderProgram]) -> [ShaderProgram] {
+        programs.filter { !draftNames.contains($0.name) }
+    }
+
     /// Everything worth watching, in catalog order.
     public static func screensavers(in programs: [ShaderProgram]) -> [ShaderProgram] {
-        let watchable = programs.filter { !fixtureNames.contains($0.name) }
-        // A catalog of nothing but fixtures is still better answered with a
-        // fixture than with nothing at all.
+        let watchable = programs.filter {
+            !fixtureNames.contains($0.name) && !draftNames.contains($0.name)
+        }
+        // A catalog of nothing but fixtures and drafts is still better
+        // answered with one of those than with nothing at all.
         return watchable.isEmpty ? programs : watchable
     }
 

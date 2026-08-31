@@ -107,7 +107,7 @@ random-pool = matrix, aurora, tunnel
 | `fps`         | target frame rate, 0 for uncapped        | 60                           |
 | `shader`      | which shader to run, or `random`         | `matrix`                     |
 | `quiet-level` | how much the terminal replies: 0, 1 or 2 | 0                            |
-| `random-pool` | the shaders `random` draws from          | every shader but `gradient`  |
+| `random-pool` | the shaders `random` draws from          | every shader listed below    |
 
 The command line wins over the file, and the file wins over the built-in
 default. That is what makes `lock-command` short: tmux takes a single string,
@@ -131,16 +131,12 @@ no effect at all.
 | `mystify`    | Windows' Mystify: bouncing polygons trailing coloured ribbons.    |
 | `tunnel`     | The demoscene tunnel, flown down with the camera swaying.         |
 | `synthwave`  | A banded sun on the horizon over a neon grid running away.        |
-| `toasters`   | After Dark's flying toasters, with the toast.                     |
 | `aurora`     | Northern lights over a black ridge line.                          |
 | `chladni`    | Chladni figures: sand on a vibrating plate, mode after mode.      |
 | `mode7`      | The SNES Mode 7 floor: a tiled plane rotating away to a horizon.  |
-| `moire`      | Two lattices drifting out of phase; the beat swallows the screen. |
 | `saturn`     | Saturn: banded globe, ringed, with the Cassini division and shadow. |
-| `raindrops`  | Drops running down a dark window, bending the city lights behind. |
 | `apollonian` | An Apollonian gasket, zooming in on a loop with no seam.          |
 | `contour`    | A contour map whose hills drift, cross-hatched like an engraving. |
-| `raster`     | A 16-bit sunset read back with a per-scanline offset: a flag, a tear. |
 | `gears`      | A gear train that really meshes, with an escapement, as an engraving. |
 | `backrooms`  | The Backrooms on a worn VHS tape: a slow walk through yellow rooms. |
 | `gradient`   | Not a screensaver: the fixture that proves the conversion works.  |
@@ -150,6 +146,12 @@ no effect at all.
 `--shader random` picks one for you at each lock, which is the point of having
 more than one. It never picks `gradient`, and `random-pool` in the config file
 narrows it further.
+
+A few shaders in `shaders/` are not on the list: they are being reworked, and
+`ShaderCatalog.draftNames` names them. They still build, still run when asked
+for with `--shader NAME`, and are still tested, but `random` never draws them
+and `--list-shaders` does not offer them. Finishing one is a matter of taking
+its name out of that set.
 
 ```tmux
 set -g lock-command '~/.local/bin/ghostty-saver --shader random'
@@ -168,7 +170,7 @@ out of the screensaver's own binary, through Metal, by way of `--dump` with
 `--frames` - rendering the shaders a second time somewhere else would produce a
 picture of something that is not quite what ships.
 
-Each clip gets its own palette. Eight shaders share nothing: a matrix green, a
+Each clip gets its own palette. The shaders share nothing: a matrix green, a
 sunset, an aurora. One colour table across the lot bands every gradient in the
 set, and a GIF is allowed a palette per frame, so there is no reason to make
 them share one.
