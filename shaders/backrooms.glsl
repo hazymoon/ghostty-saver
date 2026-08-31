@@ -107,9 +107,10 @@ const float YC_DELAY = 6.0;        // pixels the colour lags the luma by
 const float FIELD_RATE = 59.94;    // fields a second: NTSC's 60000 / 1001
 const float COMB = 0.5;            // of a field the older lines lag by
 
-// The walk is slow: 30 cells in what is left of a 150 s lap after two
-// pauses is 0.90 m/s, the pace of someone who does not know the place,
-// against the 1.3 m/s of a commuter.
+// The walk is slow: 30 cells in what is left of a 150 s lap once the two
+// pauses and the creep have taken their seconds out is 0.98 m/s, the pace
+// of someone who does not know the place, against the 1.3 m/s of a
+// commuter - and 0.54 m/s where it creeps, which is barely walking.
 const float LAP = 150.0;           // seconds per lap of the walk
 const float PAUSE = 10.0;          // seconds the camera stands still, twice a lap
 const float EASE = 2.0;            // seconds to slow into and out of a pause
@@ -117,6 +118,35 @@ const float PAUSE1 = 30.0;         // lap seconds at which each pause begins:
 const float PAUSE2 = 106.0;        // on the blackout's edge, and on the way back
 const int STEPS = 30;              // cells walked per lap
 const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
+
+// Everywhere the walk is held back, as a start, a length, an ease and a
+// depth: 1 stops it and less than 1 only slows it. The two pauses, and
+// either side of the first of them the creep - the walk up the edge of the
+// blackout, which is the one stretch of the lap the walker can see into
+// the dark from, taken at not much over half pace. It is the same thing
+// `care` reads out of the light (see SNEAK_DARK0) and the one thing about
+// it that can be seen: the gait's own carefulness is millimetres of eye
+// motion and the speed is the whole room coming at you slower.
+//
+// The depths add, so no entry may overlap another far enough to take the
+// total over 1 or the walk goes backwards. The two creeps are written so
+// that each meets the pause exactly across its ease, where the two sum to
+// 1 and no more, which is also what lets the walk creep into the stop and
+// creep back out of it rather than returning to pace first.
+//
+// Whatever they cost between them comes back as speed everywhere else:
+// walkSpeed divides by what is left of the lap, so a lap is always STEPS
+// cells however much of it is spent going slowly.
+const float CREEP = 0.45;          // how much of the pace the creep takes off
+const float CREEP_IN = 7.9;        // seconds of it before the pause: from where
+                                   // the blackout's first doorway comes into view
+const float CREEP_OUT = 16.8;      // and after it: past the last of the doorways
+const vec4 HOLDING_BACK[4] = vec4[4](
+    vec4(PAUSE1, PAUSE, EASE, 1.0),
+    vec4(PAUSE2, PAUSE, EASE, 1.0),
+    vec4(PAUSE1 - CREEP_IN, CREEP_IN + EASE, EASE, CREEP),
+    vec4(PAUSE1 + PAUSE - EASE, CREEP_OUT + EASE, EASE, CREEP)
+);
 
 // The camera is held by a person, and a person's head is steadier than the
 // hand-held shake that shaders reach for. Everything below is chosen so
@@ -196,6 +226,29 @@ const float FRIGHT_LEN = 22.0;     // seconds it is anything at all
 const float FRIGHT_OFF = 13.0;     // of which it spends this many wearing off
 const float FRIGHT_VOR = 0.30;     // share of the eyes' stabilisation left at the peak
 const float FRIGHT_STEP = 2.2;     // and how much of the step reaches the camera
+
+// And going carefully, which is the other half of it and not the same
+// half. The fright is an event; this is a state, and what sets it is the
+// light: a fifth of the tiles' cells have no working tube and one corner
+// of every tile has none at all, and a person crossing that puts the foot
+// down rather than dropping it on the heel. So `care` is read from how
+// dark it is where the body is, and what it does is take the ring out of
+// the footfall - the strike is most of what a step sounds like, and taking
+// it out is what walking quietly looks like from inside the walker's head.
+// The rest follows the same idea: the arc of the step flattens, the whole
+// of it gets smaller, and the phase slows at the strike and hurries
+// through the swing, so the foot is a long time going down and no time
+// coming up. The cadence and the speed are untouched, both because a lap
+// has to cover STEPS cells whatever happens in it and because the length
+// of a pace is the last thing anyone controls when they are listening.
+const float SNEAK_DARK0 = 0.38;    // how dark it has to be before any of this
+const float SNEAK_DARK1 = 0.62;    // and where it is all of it: the walk never
+                                   // enters the blackout, so the darkest it is
+                                   // anywhere on it is beside one of its doorways
+const float SNEAK_STRIKE = 0.25;   // share of the heel strike left at full care
+const float SNEAK_ARCH = 0.35;     // share of the step's harmonics left
+const float SNEAK_BOB = 0.72;      // share of the step's rise and sway left
+const float SNEAK_DUTY = 0.55;     // how much longer the foot takes to go down
 const float TURN = 1.5;            // cells either side of a corner it is turned over
 const float LEAD = 0.25;           // cells the head looks ahead of the body
 const float NECK = 0.10;           // metres from the neck's axis forward to the eyes
@@ -313,35 +366,6 @@ float smoothstepIntegral(float a, float b, float x) {
     return ramp + max(x - b, 0.0);
 }
 
-// Seconds spent standing still by lap-time u in a pause that begins at
-// `start`: eases in over EASE, holds, eases out over EASE.
-float stoodStill(float u, float start) {
-    return smoothstepIntegral(start, start + EASE, u)
-         - smoothstepIntegral(start + PAUSE - EASE, start + PAUSE, u);
-}
-
-// How far into the lap's walk the camera is at lap-time u, in cells. Each
-// eased pause costs PAUSE - EASE seconds of walking, and the speed is
-// whatever gets STEPS cells done in what is left of the lap: walked(LAP) is
-// exactly STEPS, so the seam between laps is continuous in position and in
-// speed. Lap-time, not iTime: stoodStill saturates after its pause, so fed
-// absolute time the pauses would only ever happen once.
-float walkSpeed() {
-    return float(STEPS) / (LAP - 2.0 * (PAUSE - EASE));
-}
-
-float walked(float u) {
-    return walkSpeed() * (u - stoodStill(u, PAUSE1) - stoodStill(u, PAUSE2));
-}
-
-// Fraction of walking pace at lap-time u: 1 on the move, 0 mid-pause. Drives
-// the footstep bob so it fades out as the camera stops.
-float pace(float u) {
-    float p1 = smoothstep(PAUSE1, PAUSE1 + EASE, u) - smoothstep(PAUSE1 + PAUSE - EASE, PAUSE1 + PAUSE, u);
-    float p2 = smoothstep(PAUSE2, PAUSE2 + EASE, u) - smoothstep(PAUSE2 + PAUSE - EASE, PAUSE2 + PAUSE, u);
-    return 1.0 - p1 - p2;
-}
-
 float smoothstepRate(float e0, float e1, float x) {
     float f = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
     return 6.0 * f * (1.0 - f) / (e1 - e0);
@@ -355,6 +379,53 @@ float bump(float u, float a0, float a1, float b0, float b1) {
 
 float bumpRate(float u, float a0, float a1, float b0, float b1) {
     return smoothstepRate(a0, a1, u) - smoothstepRate(b0, b1, u);
+}
+
+// Seconds of walking lost by lap-time u to one entry of HOLDING_BACK: it
+// eases off over e.z, holds at a depth of e.w, and eases back on over e.z
+// again. A depth of 1 is a stop and anything less is the walk going slower
+// for a while; either way, past its end the entry has cost exactly
+// e.w * (e.y - e.z) seconds and costs nothing more.
+float slowed(float u, vec4 e) {
+    return e.w * (smoothstepIntegral(e.x, e.x + e.z, u)
+                - smoothstepIntegral(e.x + e.y - e.z, e.x + e.y, u));
+}
+
+float slowedAll(float u) {
+    float lost = 0.0;
+    for (int i = 0; i < HOLDING_BACK.length(); i++) lost += slowed(u, HOLDING_BACK[i]);
+    return lost;
+}
+
+// How far into the lap's walk the camera is at lap-time u, in cells. The
+// speed is whatever gets STEPS cells done in what is left of the lap once
+// every entry has taken its seconds out: walked(LAP) is exactly STEPS, so
+// the seam between laps is continuous in position and in speed. Lap-time,
+// not iTime: `slowed` saturates after its entry, so fed absolute time each
+// entry would only ever happen once.
+float walkSpeed() {
+    float lost = 0.0;
+    for (int i = 0; i < HOLDING_BACK.length(); i++) {
+        vec4 e = HOLDING_BACK[i];
+        lost += e.w * (e.y - e.z);
+    }
+    return float(STEPS) / (LAP - lost);
+}
+
+float walked(float u) {
+    return walkSpeed() * (u - slowedAll(u));
+}
+
+// Fraction of walking pace at lap-time u: 1 on the move, 0 mid-pause, and
+// in between where the walk is only being held back. Drives the footstep
+// bob, so it fades out as the camera stops.
+float pace(float u) {
+    float held = 0.0;
+    for (int i = 0; i < HOLDING_BACK.length(); i++) {
+        vec4 e = HOLDING_BACK[i];
+        held += e.w * bump(u, e.x, e.x + e.z, e.x + e.y - e.z, e.x + e.y);
+    }
+    return 1.0 - held;
 }
 
 // How frightened the walker is at lap-time u, from 0 to 1. See FRIGHT_AT.
@@ -782,6 +853,27 @@ vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
     return WALL_COLOR * (0.92 + 0.08 * stripe) * (0.8 + 0.35 * grime) * skirting * top;
 }
 
+// How dark it is around `body`, from 0 where every cell has its tube on to
+// 1 in the blackout, and from that how carefully the walker is going. The
+// tubes are read over a tent four cells wide rather than at the cell the
+// body is in: one cell in five is dark anywhere, and a walk that crept
+// through every one of them would be creeping most of the lap. The tent's
+// weights fall to zero at its edge, so a cell joining or leaving the
+// sixteen does so weighing nothing and the answer never steps.
+float care(vec2 body) {
+    float lit = 0.0;
+    float total = 0.0;
+    vec2 base = floor(body) - 1.0;
+    for (int k = 0; k < 16; k++) {
+        vec2 c = base + vec2(float(k & 3), float(k >> 2));
+        vec2 w2 = max(1.0 - abs(c - body) * 0.5, 0.0);
+        float w = w2.x * w2.y;
+        lit += w * (hasTube(c) ? 1.0 : 0.0);
+        total += w;
+    }
+    return smoothstep(SNEAK_DARK0, SNEAK_DARK1, 1.0 - lit / total);
+}
+
 // --- the tape -------------------------------------------------------------
 
 // Scene time, after the deck has dropped a frame: in every DROP_SLOT
@@ -910,18 +1002,33 @@ Pose cameraPose(float t) {
     // on top, split into what the eyes counter well and what they do not.
     // All of it scales with the body's speed, `gait`.
     // A frightened walker brings the step to the camera whole (`braced`)
-    // and stops countering it with the eyes (`vor`); see FRIGHT_AT.
+    // and stops countering it with the eyes (`vor`); see FRIGHT_AT. A
+    // careful one puts the foot down instead of dropping it: `quiet` is
+    // what is left of the heel strike, `arch2`/`arch3` the flattened arc,
+    // and `duty` how much of the step's phase is spent going down rather
+    // than coming up. See SNEAK_DARK0.
     float fear = fright(u);
     float braced = mix(1.0, FRIGHT_STEP, fear);
     float vor = mix(1.0, FRIGHT_VOR, fear);
-    float amp = mix(stepSize(stepNo), stepSize(stepNo + 1.0), su) * gait * braced;
-    float arch = 1.0 / (1.0 + ARCH2 + ARCH3);
-    float strike = IMPACT * gait * braced;
-    float bobLow = -BOB * amp * arch * cos(6.2831853 * su);
-    float bobHigh = -BOB * amp * arch * (ARCH2 * cos(12.566371 * su) + ARCH3 * cos(18.849556 * su))
+    float quietly = care(body);
+    float quiet = mix(1.0, SNEAK_STRIKE, quietly);
+    float arch2 = ARCH2 * mix(1.0, SNEAK_ARCH, quietly);
+    float arch3 = ARCH3 * mix(1.0, SNEAK_ARCH, quietly);
+    float duty = SNEAK_DUTY * quietly * moving;
+    // The step's phase, slow at the strike and quick through the swing, and
+    // how fast that phase is running. Substituting both for `su` and
+    // `stepRate` leaves the bob's rate exact.
+    float sw = su - duty / 6.2831853 * sin(6.2831853 * su);
+    float swRate = stepRate * (1.0 - duty * cos(6.2831853 * su));
+    float amp = mix(stepSize(stepNo), stepSize(stepNo + 1.0), su) * gait * braced
+        * mix(1.0, SNEAK_BOB, quietly);
+    float arch = 1.0 / (1.0 + arch2 + arch3);
+    float strike = IMPACT * gait * braced * quiet;
+    float bobLow = -BOB * amp * arch * cos(6.2831853 * sw);
+    float bobHigh = -BOB * amp * arch * (arch2 * cos(12.566371 * sw) + arch3 * cos(18.849556 * sw))
         + strike * ring(sinceStrike, IMPACT_TAU);
-    float bobRate = BOB * amp * arch * stepRate * (6.2831853 * sin(6.2831853 * su)
-        + ARCH2 * 12.566371 * sin(12.566371 * su) + ARCH3 * 18.849556 * sin(18.849556 * su))
+    float bobRate = BOB * amp * arch * swRate * (6.2831853 * sin(6.2831853 * sw)
+        + arch2 * 12.566371 * sin(12.566371 * sw) + arch3 * 18.849556 * sin(18.849556 * sw))
         + strike * ringRate(sinceStrike, IMPACT_TAU) * moving;
     // Sideways once a stride, and into the turn; forwards with the surge.
     float sway = SWAY * amp * sin(6.2831853 * strideP) + LEAN * moving * turning;
@@ -930,8 +1037,8 @@ Pose cameraPose(float t) {
     float surgeRate = RIPPLE * gait * walkSpeed() * CELL * cos(6.2831853 * su) * moving;
     float roll = GAIT_ROLL * gait * sin(6.2831853 * strideP);
     float rollRate = GAIT_ROLL * gait * cos(6.2831853 * strideP) * 3.14159265 * stepRate;
-    float kick = KICK * gait * braced * ring(sinceStrike, KICK_TAU);
-    float kickRate = KICK * gait * braced * ringRate(sinceStrike, KICK_TAU) * moving;
+    float kick = KICK * gait * braced * quiet * ring(sinceStrike, KICK_TAU);
+    float kickRate = KICK * gait * braced * quiet * ringRate(sinceStrike, KICK_TAU) * moving;
     vec3 side = vec3(cos(heading), 0.0, -sin(heading));
     vec3 ahead = vec3(sin(heading), 0.0, cos(heading));
 
