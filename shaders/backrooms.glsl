@@ -174,6 +174,28 @@ const float GAZE_ON = 2.0;         // seconds the eyes take to find something
 const float GAZE_OFF = 1.6;        // and to come back off it
 const float VOR_STEP = 0.75;       // share of the step's fundamental the eyes counter
 const float VOR_HIGH = 0.5;        // share of the harmonics and the strike
+
+// Being frightened, as the camera has it. A viewfinder held to the eye of
+// someone who is looking where they are going is the steadiest a camcorder
+// gets, and the two things that make it so are the two that go first: the
+// eyes stop countering the step, because they are on whatever the fright
+// was and not on the far wall, and the arm stops bracing, so the step
+// arrives at the camera nearly whole. Nothing here is an angle the walker
+// is given; the picture rotates only because the eyes have stopped
+// countering it, which is the way it happens.
+//
+// It is one event a lap, it takes hold in FRIGHT_ON and wears off over
+// FRIGHT_OFF, and the wearing off is the slow part: fright arrives all at
+// once and leaves by being talked out of. The envelope is nowhere near the
+// sickness band even so - it is the depth of a 1.5 Hz carrier, not a
+// motion of its own, so what it puts in the spectrum is sidebands beside
+// the step and nothing at the rate it swells at.
+const float FRIGHT_AT = 44.5;      // lap second it lands: the gaze coming off the dark
+const float FRIGHT_ON = 1.2;       // seconds it takes hold
+const float FRIGHT_LEN = 22.0;     // seconds it is anything at all
+const float FRIGHT_OFF = 13.0;     // of which it spends this many wearing off
+const float FRIGHT_VOR = 0.30;     // share of the eyes' stabilisation left at the peak
+const float FRIGHT_STEP = 2.2;     // and how much of the step reaches the camera
 const float TURN = 1.5;            // cells either side of a corner it is turned over
 const float LEAD = 0.25;           // cells the head looks ahead of the body
 const float NECK = 0.10;           // metres from the neck's axis forward to the eyes
@@ -333,6 +355,12 @@ float bump(float u, float a0, float a1, float b0, float b1) {
 
 float bumpRate(float u, float a0, float a1, float b0, float b1) {
     return smoothstepRate(a0, a1, u) - smoothstepRate(b0, b1, u);
+}
+
+// How frightened the walker is at lap-time u, from 0 to 1. See FRIGHT_AT.
+float fright(float u) {
+    return bump(u, FRIGHT_AT, FRIGHT_AT + FRIGHT_ON,
+                FRIGHT_AT + FRIGHT_LEN - FRIGHT_OFF, FRIGHT_AT + FRIGHT_LEN);
 }
 
 // The bump of a look taken while stood still: how far the camera has turned
@@ -881,14 +909,20 @@ Pose cameraPose(float t) {
     // The bob: the pendulum's arc with its harmonics, and the strike's ring
     // on top, split into what the eyes counter well and what they do not.
     // All of it scales with the body's speed, `gait`.
-    float amp = mix(stepSize(stepNo), stepSize(stepNo + 1.0), su) * gait;
+    // A frightened walker brings the step to the camera whole (`braced`)
+    // and stops countering it with the eyes (`vor`); see FRIGHT_AT.
+    float fear = fright(u);
+    float braced = mix(1.0, FRIGHT_STEP, fear);
+    float vor = mix(1.0, FRIGHT_VOR, fear);
+    float amp = mix(stepSize(stepNo), stepSize(stepNo + 1.0), su) * gait * braced;
     float arch = 1.0 / (1.0 + ARCH2 + ARCH3);
+    float strike = IMPACT * gait * braced;
     float bobLow = -BOB * amp * arch * cos(6.2831853 * su);
     float bobHigh = -BOB * amp * arch * (ARCH2 * cos(12.566371 * su) + ARCH3 * cos(18.849556 * su))
-        + IMPACT * gait * ring(sinceStrike, IMPACT_TAU);
+        + strike * ring(sinceStrike, IMPACT_TAU);
     float bobRate = BOB * amp * arch * stepRate * (6.2831853 * sin(6.2831853 * su)
         + ARCH2 * 12.566371 * sin(12.566371 * su) + ARCH3 * 18.849556 * sin(18.849556 * su))
-        + IMPACT * gait * ringRate(sinceStrike, IMPACT_TAU) * moving;
+        + strike * ringRate(sinceStrike, IMPACT_TAU) * moving;
     // Sideways once a stride, and into the turn; forwards with the surge.
     float sway = SWAY * amp * sin(6.2831853 * strideP) + LEAN * moving * turning;
     float swayRate = SWAY * amp * cos(6.2831853 * strideP) * 3.14159265 * stepRate;
@@ -896,8 +930,8 @@ Pose cameraPose(float t) {
     float surgeRate = RIPPLE * gait * walkSpeed() * CELL * cos(6.2831853 * su) * moving;
     float roll = GAIT_ROLL * gait * sin(6.2831853 * strideP);
     float rollRate = GAIT_ROLL * gait * cos(6.2831853 * strideP) * 3.14159265 * stepRate;
-    float kick = KICK * gait * ring(sinceStrike, KICK_TAU);
-    float kickRate = KICK * gait * ringRate(sinceStrike, KICK_TAU) * moving;
+    float kick = KICK * gait * braced * ring(sinceStrike, KICK_TAU);
+    float kickRate = KICK * gait * braced * ringRate(sinceStrike, KICK_TAU) * moving;
     vec3 side = vec3(cos(heading), 0.0, -sin(heading));
     vec3 ahead = vec3(sin(heading), 0.0, cos(heading));
 
@@ -914,7 +948,7 @@ Pose cameraPose(float t) {
     vec3 vel = vec3(going.x, 0.0, going.y) * CELL * sRate
         + NECK * yawRate * vec3(cos(yaw), 0.0, -sin(yaw))
         + side * swayRate + ahead * surgeRate + vec3(0.0, bobRate, 0.0);
-    vec3 known = head + shift + vec3(0.0, VOR_STEP * bobLow + VOR_HIGH * bobHigh, 0.0);
+    vec3 known = head + shift + vec3(0.0, vor * (VOR_STEP * bobLow + VOR_HIGH * bobHigh), 0.0);
     vec3 target = head + vec3(sin(yaw), 0.0, cos(yaw)) * GAZE;
     vec3 forward = normalize(target - known);
     vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), forward));
