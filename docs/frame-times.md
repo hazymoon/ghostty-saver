@@ -101,6 +101,14 @@ the same shader with nothing else running measures `mystify` at 4.803 ms
 against the 6.425 ms here. The number to design against is this one; the
 quiet one says how much of it is the shader.
 
+The quiet one has somewhere to come from: `GHOSTTY_SAVER_TIME=<name> swift
+test` renders the same shader at the same resolution with no window and no
+terminal and prints mean, p50, p95 and min (see `README.md` under "Staying
+inside the frame"). It is for comparing a change against what it changed, on
+the same machine within the same few minutes - it moves by a millisecond or
+more with whatever else the machine is doing, so a figure from it is not
+comparable with the table above or with one taken on another day.
+
 **The ack is the terminal's parse, not its paint.** As in the transport
 measurements, a `q=0` reply means Ghostty stored the image. It also moves with
 how hard the terminal is working: the same shader was measured with acks
