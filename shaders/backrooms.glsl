@@ -23,7 +23,8 @@
 // different GPUs.
 //
 // The picture is the 4:3 camcorder frame, with black bars either side on a
-// wide screen; set PILLARBOX to 0 to fill the screen instead.
+// wide screen; set PILLARBOX to 0 to fill the screen instead. It is drawn
+// as a tape plays it, a field at a time (see FIELD_RATE).
 
 #define PILLARBOX 1
 
@@ -76,6 +77,19 @@ const float CROSS_COLOR = 0.8;     // colour made from a horizontal luma slope
 const float DOT_CRAWL = 0.18;      // luma made from colour at the subcarrier
 const float SUBCARRIER = 0.125;    // cycles per pixel
 const float YC_DELAY = 6.0;        // pixels the colour lags the luma by
+
+// The tape's time. VHS records fields, not frames: the two heads on the
+// drum each lay down one track a half turn, 59.94 tracks a second, and a
+// track is one field, every other line of the picture. There is no frame
+// on the tape. What is on screen at any moment is the lines of the latest
+// field over the lines of the one before it, a field older; on a still
+// picture the two agree and it is sharp, on a moving one every edge is
+// combed, odd lines a field behind even ones, and the picture loses
+// resolution as it moves, which is much of what VHS motion looks like.
+// Each line's scene is traced at its own field's instant, so the comb
+// costs nothing: one trace a pixel either way. Everything on the tape, the
+// noise, the head switch, the subcarrier's phase, ticks by the field too.
+const float FIELD_RATE = 59.94;    // fields a second: NTSC's 60000 / 1001
 
 // The walk is slow: 30 cells in what is left of a 150 s lap after two
 // pauses is 0.90 m/s, the pace of someone who does not know the place,
@@ -145,7 +159,7 @@ const float GATE = 0.5;            // depth of the step's modulation of the yaw 
 const float ARCH2 = 0.20;          // second and third harmonics of the bob
 const float ARCH3 = 0.05;
 const float IMPACT = 0.004;        // metres the heel strike rings by
-const float IMPACT_TAU = 0.07;     // seconds it takes to die away (>= 3 frames)
+const float IMPACT_TAU = 0.07;     // seconds it takes to die away (about 4 fields)
 const float IMPACT_HZ = 9.0;       // and how fast it rings
 const float KICK = 0.0017;         // radians of pitch the strike knocks in, uncountered
 const float KICK_TAU = 0.08;
@@ -657,8 +671,6 @@ float trackingBand(float y, float t) {
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
-    float t = droppedFrames(iTime);
-
     // Screen coordinates: y up, height 1, and the frame's aspect. fragCoord
     // grows downward here and in Ghostty alike, so it is flipped once, here.
     // With the pillarbox the picture is the 4:3 middle and the rest is
@@ -680,19 +692,31 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 #endif
     uv.y = -uv.y;
 
+    // The field being written, and the field each line was last written
+    // in (see the note at FIELD_RATE): the lines of the other parity are a
+    // field older, and the scene on them is traced a field earlier. The
+    // count restarts every hour, which is a whole number of fields and of
+    // four-field colour cycles, so nothing below notices the restart; and
+    // it is folded to [0, 100) before it seeds anything: fed straight in,
+    // it reaches the millions overnight, and sin() of its multiples loses
+    // enough precision on the GPU to bias the hash, which tints the whole
+    // picture.
+    float fields = mod(iTime, 3600.0) * FIELD_RATE;
+    float fieldNo = floor(fields);
+    float line = floor(inFrame.y / frame.y * LINES);
+    float stale = abs(mod(line, 2.0) - mod(fieldNo, 2.0));  // 1 on the older field's lines
+    float lineField = fieldNo - stale;
+    float now = iTime - (fields - fieldNo) / FIELD_RATE;     // this field's instant
+    float t = droppedFrames(now) - stale / FIELD_RATE;  // a dropped frame holds both fields
+    vec2 fseed = floor(vec2(hash11(fieldNo + 0.31), hash11(fieldNo + 0.77)) * 100.0);
+
     // Tape faults that displace whole scan lines are applied here, to the
     // ray, so the picture really shifts rather than a copy of it.
-    // The frame number restarts every hour and is folded to [0, 100)
-    // before it seeds anything: fed straight in, it reaches the millions
-    // overnight, and sin() of its multiples loses enough precision on the
-    // GPU to bias the hash, which tints the whole picture.
-    float frameNo = floor(mod(iTime, 3600.0) * 60.0);
-    vec2 fseed = floor(vec2(hash11(frameNo + 0.31), hash11(frameNo + 0.77)) * 100.0);
-    float band = trackingBand(screenY, iTime);
+    float band = trackingBand(screenY, now);
     float bandShift = band * (0.05 + 0.04 * hash11(floor(screenY * 90.0) + fseed.x));
     float headSwitch = 1.0 - smoothstep(0.0, 0.03, screenY);
     float headShift = headSwitch * 0.03 * (fseed.y * 0.01 - 0.5);
-    float wobble = 0.0012 * sin(screenY * 37.0 + iTime * 21.0) * (0.5 + 0.5 * sin(iTime * 0.7));
+    float wobble = 0.0012 * sin(screenY * 37.0 + now * 21.0) * (0.5 + 0.5 * sin(now * 0.7));
     uv.x += bandShift + headShift + wobble;
 
     // The lens: barrel distortion, then a wide field of view.
@@ -817,7 +841,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 dyiq = RGB2YIQ * dFdx(col);
     float Y = yiq.x;
     vec2 C = yiq.yz;
-    float line = floor(inFrame.y / frame.y * LINES);
     vec2 lumaCell = floor(inFrame / frame * vec2(LUMA_SAMPLES, LINES));
     vec2 chromaCell = floor(inFrame / frame * vec2(CHROMA_SAMPLES, LINES * 0.5));
     float bandEdge = band * (1.0 - band) * 4.0;
@@ -834,9 +857,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     C *= 1.0 - band * 0.85;
     C += blotch * (CHROMA_NOISE + bandEdge * 0.35);
     // Cross-colour: a horizontal luma slope near the subcarrier's frequency
-    // is demodulated as colour, and the subcarrier's phase turns by a
-    // quarter cycle a pixel, half a cycle a line, half a cycle a frame.
-    float sub = 6.2831853 * inFrame.x * SUBCARRIER + 3.14159265 * (line + frameNo);
+    // is demodulated as colour. The subcarrier turns a quarter cycle a
+    // pixel here and, as NTSC's does, a quarter cycle back a line of the
+    // picture and half a cycle a frame, on each line as of the field that
+    // last wrote it: the pattern comes round every fourth field, and moved
+    // a field at a time, the dots crawl.
+    float sub = 6.2831853 * inFrame.x * SUBCARRIER - 1.5707963 * line + 3.14159265 * floor(mod(lineField, 4.0) * 0.5);
     vec2 carrier = vec2(cos(sub), sin(sub));
     C += carrier * clamp(dyiq.x * 0.5, -0.06, 0.06) * CROSS_COLOR;
     // Dot crawl: colour at the subcarrier leaks back into luma, where the
@@ -845,13 +871,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     Y += dot(C, carrier) * DOT_CRAWL * crawlEdge;
 
     // Luma noise: fine grain, sparse snow that widens to a streak, the
-    // torn bright tracking band, and snow at the head switch, both grey.
-    float grain = cheap21(floor(fragCoord / 2.5) + floor(fract(iTime * 7.0) * 100.0));
+    // torn bright tracking band, and snow at the head switch, both grey,
+    // all seeded by the field.
+    float grain = cheap21(floor(fragCoord / 2.5) + fseed);
     float snow = step(0.93, cheap21(lumaCell + fseed + 3.0)) - step(0.93, cheap21(lumaCell + fseed.yx + 5.0));
     Y += (grain - 0.5) * LUMA_GRAIN + snow * (LUMA_SNOW + band * 0.55);
     float bandNoise = cheap21(vec2(floor(screenY * 240.0), fseed.y));
     Y = mix(Y, 0.7 + 0.3 * bandNoise, band * 0.8);
-    float headSnow = cheap21(floor(fragCoord) + floor(fract(iTime * 13.0) * 50.0));
+    float headSnow = cheap21(floor(fragCoord) + fseed.yx);
     Y = mix(Y, headSnow * 0.6, headSwitch * 0.9);
     C *= 1.0 - headSwitch;
     col = YIQ2RGB * vec3(Y, C);
