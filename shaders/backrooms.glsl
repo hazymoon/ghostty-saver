@@ -149,6 +149,10 @@ const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 //   behind the eyes, so turning the head moves the eyes sideways and the
 //   picture parallaxes as well as rotates. Without both, a turn is a tank
 //   pivoting on the spot.
+// - The eyes leave the heading only for something that is there: a look
+//   taken while stood still, or a gaze held on a place the body walks past
+//   (GAZE_AT). Both are events, a few seconds long and most of a lap
+//   apart, and neither is a wander. A wander is the sickness band again.
 //
 // And a person's gait is not a metronome, or a sine wave. The steps are
 // uneven (JITTER, ASYM, STEP_JITTER), the rise of each is the arc of an
@@ -164,6 +168,10 @@ const float BOB = 0.025;           // metres, vertical, once a step
 const float SWAY = 0.020;          // metres, lateral, once a stride
 const float GAIT_ROLL = 0.007;     // radians, once a stride
 const float GAZE = 6.0;            // metres ahead, where the eyes fix
+const float GAZE_HOLD = 1.45;      // radians off the walk's heading the eyes will follow
+const float GAZE_KNEE = 6.0;       // how squarely the follow runs out at GAZE_HOLD
+const float GAZE_ON = 2.0;         // seconds the eyes take to find something
+const float GAZE_OFF = 1.6;        // and to come back off it
 const float VOR_STEP = 0.75;       // share of the step's fundamental the eyes counter
 const float VOR_HIGH = 0.5;        // share of the harmonics and the strike
 const float TURN = 1.5;            // cells either side of a corner it is turned over
@@ -231,6 +239,23 @@ const int OPEN_SIDES[64] = int[64](
      0, 10,  0,  0, 10, 10,  0,  0
 );
 
+// The places the eyes stay on, and when. A look taken while stood still
+// (lookBump) turns the head by a set angle; these do not set an angle at
+// all. Each is a window of lap time and a point of the floor plan, in the
+// cells WAYPOINT is in, and through the window the eyes are on that point:
+// the angle follows from where the body has got to, so the thing sits
+// still in the frame while the walls slide past it, which is what watching
+// something looks like and what turning the head does not.
+//
+// x, z, the lap second it opens, and how long it is open. The one gaze is
+// a room of the blackout, seen through the doorways on the walk up its
+// edge: the walker has already stopped and looked into the dark at PAUSE1,
+// and starts walking again still watching it, over the shoulder, until the
+// neck gives out and the head comes back to where the feet are going.
+const vec4 GAZE_AT[1] = vec4[1](
+    vec4(6.0, 5.0, 40.0, 6.5)
+);
+
 // A hash without a sin(), on whole numbers (pcg2d). The walls and the
 // tubes are placed by it, and so are the stains, the grain and the tape's
 // faults: the walls are looked up a dozen times a pixel and the tubes
@@ -295,23 +320,72 @@ float pace(float u) {
     return 1.0 - p1 - p2;
 }
 
-// A bump that rises over the first half of a pause and falls over the
-// second: how far the camera has turned to look at something before
-// turning back. Both halves are long, so the looks peak at about 35
-// degrees a second.
-float lookBump(float u, float start) {
-    return smoothstep(start + 0.3, start + PAUSE * 0.5, u)
-         - smoothstep(start + PAUSE * 0.55, start + PAUSE - 0.2, u);
-}
-
 float smoothstepRate(float e0, float e1, float x) {
     float f = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
     return 6.0 * f * (1.0 - f) / (e1 - e0);
 }
 
+// One up over a0..a1 and back down over b0..b1, and how fast it is moving:
+// the shape of anything the walker does once and stops doing.
+float bump(float u, float a0, float a1, float b0, float b1) {
+    return smoothstep(a0, a1, u) - smoothstep(b0, b1, u);
+}
+
+float bumpRate(float u, float a0, float a1, float b0, float b1) {
+    return smoothstepRate(a0, a1, u) - smoothstepRate(b0, b1, u);
+}
+
+// The bump of a look taken while stood still: how far the camera has turned
+// to look at something before turning back. Both halves are long, so the
+// looks peak at about 35 degrees a second.
+float lookBump(float u, float start) {
+    return bump(u, start + 0.3, start + PAUSE * 0.5, start + PAUSE * 0.55, start + PAUSE - 0.2);
+}
+
 float lookBumpRate(float u, float start) {
-    return smoothstepRate(start + 0.3, start + PAUSE * 0.5, u)
-         - smoothstepRate(start + PAUSE * 0.55, start + PAUSE - 0.2, u);
+    return bumpRate(u, start + 0.3, start + PAUSE * 0.5, start + PAUSE * 0.55, start + PAUSE - 0.2);
+}
+
+// How far off the heading the eyes are at lap-time u because they are on
+// one of GAZE_AT, and how fast that angle is moving. `eye` is the neck's
+// axis in metres and `eyeVel` how fast it is moving: the angle to a point
+// that does not move changes anyway as the body walks past it, and that
+// change is most of what makes a held gaze read. `ahead` is the yaw the
+// walk alone would have, since the answer is an offset from it.
+//
+// A neck runs out, and the run-out has to be soft or the yaw rate steps.
+// It is soft only where it has to be: x / (1 + (x / hold)^knee)^(1/knee) is
+// the angle itself until the angle is most of GAZE_HOLD, and approaches
+// GAZE_HOLD after that. A tanh would do the same job but bends from zero,
+// and an eye that is following something 60 degrees round has to be 60
+// degrees round, not 50: the thing has to sit still in the frame.
+//
+// The window's edges bring the head back, and that return is the fastest
+// thing in the walk: released from the limit over GAZE_OFF it comes
+// forward at some 50 degrees a second, which is a person snapping their
+// eyes back to where they are going.
+void gazeOffset(float u, vec2 eye, vec2 eyeVel, float ahead, float aheadRate,
+                out float off, out float offRate) {
+    off = 0.0;
+    offRate = 0.0;
+    for (int i = 0; i < GAZE_AT.length(); i++) {
+        vec4 g = GAZE_AT[i];
+        float a0 = g.z;
+        float a1 = g.z + GAZE_ON;
+        float b0 = g.z + g.w - GAZE_OFF;
+        float b1 = g.z + g.w;
+        float w = bump(u, a0, a1, b0, b1);
+        if (w <= 0.0) continue;
+        vec2 d = (g.xy + 0.5) * CELL - eye;
+        float rel = atan(d.x, d.y) - ahead;
+        rel = atan(sin(rel), cos(rel));
+        float relRate = (d.x * eyeVel.y - d.y * eyeVel.x) / dot(d, d) - aheadRate;
+        float knee = 1.0 + pow(abs(rel) / GAZE_HOLD, GAZE_KNEE);
+        float held = rel * pow(knee, -1.0 / GAZE_KNEE);
+        off += w * held;
+        offRate += w * pow(knee, -1.0 - 1.0 / GAZE_KNEE) * relRate
+                 + bumpRate(u, a0, a1, b0, b1) * held;
+    }
 }
 
 // Waypoint k of the walk, for any k: laps beyond the first move the whole
@@ -794,6 +868,13 @@ Pose cameraPose(float t) {
     // second.
     float look = 1.6 * lookBump(u, PAUSE1) - 1.8 * lookBump(u, PAUSE2);
     float lookRate = 1.6 * lookBumpRate(u, PAUSE1) - 1.8 * lookBumpRate(u, PAUSE2);
+    // And looking at something while walking past it, which is an angle
+    // that has to be worked out rather than set: see GAZE_AT.
+    float gazeOff, gazeRate;
+    gazeOffset(u, (body + 0.5) * CELL, going * CELL * sRate, heading + neck,
+               headingRate + neckRate, gazeOff, gazeRate);
+    look += gazeOff;
+    lookRate += gazeRate;
     float yaw = heading + neck + look;
     float yawRate = headingRate + neckRate + lookRate;
 
