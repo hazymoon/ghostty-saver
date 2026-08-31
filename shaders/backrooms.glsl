@@ -255,23 +255,26 @@ const float FRIGHT_VOR = 0.30;     // share of the eyes' stabilisation left at t
 const float FRIGHT_STEP = 2.2;     // and how much of the step reaches the camera
 
 // And going carefully, which is the other half of it and not the same
-// half. The fright is an event; this is a state, and what sets it is the
-// light: a fifth of the tiles' cells have no working tube and one corner
-// of every tile has none at all, and a person crossing that puts the foot
-// down rather than dropping it on the heel. So `care` is read from how
-// dark it is where the body is, and what it does is take the ring out of
-// the footfall - the strike is most of what a step sounds like, and taking
-// it out is what walking quietly looks like from inside the walker's head.
-// The rest follows the same idea: the arc of the step flattens, the whole
-// of it gets smaller, and the phase slows at the strike and hurries
+// half. The fright is an event; this is a state, and the state is the
+// creep: where the walk is being held back it is being held back because
+// the walker is treading, so the same `pace` that slows the body takes the
+// ring out of the footfall - the strike is most of what a step sounds
+// like, and taking it out is what walking quietly looks like from inside
+// the walker's head. The rest follows: the arc of the step flattens, the
+// whole of it gets smaller, and the phase slows at the strike and hurries
 // through the swing, so the foot is a long time going down and no time
-// coming up. The cadence and the speed are untouched, both because a lap
-// has to cover STEPS cells whatever happens in it and because the length
-// of a pace is the last thing anyone controls when they are listening.
-const float SNEAK_DARK0 = 0.38;    // how dark it has to be before any of this
-const float SNEAK_DARK1 = 0.62;    // and where it is all of it: the walk never
-                                   // enters the blackout, so the darkest it is
-                                   // anywhere on it is beside one of its doorways
+// coming up. The cadence is untouched: the length of a pace is the last
+// thing anyone controls when they are listening.
+//
+// This was read from the light once - the tubes over a tent four cells
+// wide, so that the one cell in five that is unlit anywhere did not have
+// the walker creeping through most of the lap - and where the creep is is
+// still where that said to put it. It is not read from the light any more.
+// Sixteen tube hashes are 2.3 ms a frame at 4K, a third of the whole
+// budget, and what they were buying is a tenth of a grey level: the eyes
+// counter the step and the bob is 25 mm, so a careful footfall and a
+// careless one differ by millimetres of eye motion. The creep's own
+// slowness is the part of it anyone can see, and the creep is free.
 const float SNEAK_STRIKE = 0.25;   // share of the heel strike left at full care
 const float SNEAK_ARCH = 0.35;     // share of the step's harmonics left
 const float SNEAK_BOB = 0.72;      // share of the step's rise and sway left
@@ -880,27 +883,6 @@ vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
     return WALL_COLOR * (0.92 + 0.08 * stripe) * (0.8 + 0.35 * grime) * skirting * top;
 }
 
-// How dark it is around `body`, from 0 where every cell has its tube on to
-// 1 in the blackout, and from that how carefully the walker is going. The
-// tubes are read over a tent four cells wide rather than at the cell the
-// body is in: one cell in five is dark anywhere, and a walk that crept
-// through every one of them would be creeping most of the lap. The tent's
-// weights fall to zero at its edge, so a cell joining or leaving the
-// sixteen does so weighing nothing and the answer never steps.
-float care(vec2 body) {
-    float lit = 0.0;
-    float total = 0.0;
-    vec2 base = floor(body) - 1.0;
-    for (int k = 0; k < 16; k++) {
-        vec2 c = base + vec2(float(k & 3), float(k >> 2));
-        vec2 w2 = max(1.0 - abs(c - body) * 0.5, 0.0);
-        float w = w2.x * w2.y;
-        lit += w * (hasTube(c) ? 1.0 : 0.0);
-        total += w;
-    }
-    return smoothstep(SNEAK_DARK0, SNEAK_DARK1, 1.0 - lit / total);
-}
-
 // --- the tape -------------------------------------------------------------
 
 // Scene time, after the deck has dropped a frame: in every DROP_SLOT
@@ -1037,14 +1019,16 @@ Pose cameraPose(float t) {
     // All of it scales with the body's speed, `gait`.
     // A frightened walker brings the step to the camera whole (`braced`)
     // and stops countering it with the eyes (`vor`); see FRIGHT_AT. A
-    // careful one puts the foot down instead of dropping it: `quiet` is
-    // what is left of the heel strike, `arch2`/`arch3` the flattened arc,
-    // and `duty` how much of the step's phase is spent going down rather
-    // than coming up. See SNEAK_DARK0.
+    // careful one puts the foot down instead of dropping it: `quietly` is
+    // how far into the creep the walk is, `quiet` what is left of the heel
+    // strike, `arch2`/`arch3` the flattened arc, and `duty` how much of the
+    // step's phase is spent going down rather than coming up. A stop is
+    // past the creep's depth and reads as fully careful, which costs
+    // nothing: `moving` has taken the gait to zero by then. See SNEAK_STRIKE.
     float fear = fright(u);
     float braced = mix(1.0, FRIGHT_STEP, fear);
     float vor = mix(1.0, FRIGHT_VOR, fear);
-    float quietly = care(body);
+    float quietly = clamp((1.0 - moving) / CREEP, 0.0, 1.0);
     float quiet = mix(1.0, SNEAK_STRIKE, quietly);
     float arch2 = ARCH2 * mix(1.0, SNEAK_ARCH, quietly);
     float arch3 = ARCH3 * mix(1.0, SNEAK_ARCH, quietly);
