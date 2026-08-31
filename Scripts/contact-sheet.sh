@@ -55,6 +55,7 @@ default_times() {
         toasters) echo "0 3 5 8 12 20 30 45" ;;
         aurora) echo "0 10 20 30 45 62 75 90" ;;
         mystify) echo "0 3 6 9 11 15 20 30" ;;
+        backrooms) echo "0 12 24 35 60 90 111 140" ;;
         *) echo "0 2 5 10 15 20 30 60" ;;
     esac
 }

@@ -440,4 +440,19 @@ struct ShaderAppearanceTests {
         let landMean = (land.red + land.green + land.blue) / 3
         #expect(landMean < 12, "the ridge line should be dark (mean \(landMean))")
     }
+
+    /// Yellow rooms on a dim tape: warm over blue everywhere, and neither a
+    /// black screen nor a bright one. Where the camera is looking is not
+    /// checked; it walks, and the tape faults move about.
+    @Test("the backrooms are yellow and dim")
+    func backroomsAreYellow() throws {
+        guard let frame = try RenderedFrame.make(named: "backrooms", width: 640, height: 360, time: 12.0) else {
+            return
+        }
+        let means = frame.channelMeans()
+        #expect(means.red > means.blue * 1.5, "the rooms have lost their yellow (red \(means.red), blue \(means.blue))")
+        #expect(means.green > means.blue * 1.5, "the rooms have lost their yellow (green \(means.green), blue \(means.blue))")
+        #expect(frame.brightness() > 30, "the tape has gone dark (mean \(frame.brightness()))")
+        #expect(frame.brightness() < 140, "the tape has washed out (mean \(frame.brightness()))")
+    }
 }

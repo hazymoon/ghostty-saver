@@ -30,7 +30,8 @@
 # @arg --expect-size WxH  fail a run whose resolution differs from this
 # @arg --out DIR          keep each run's --stats output here (default a temp dir)
 # @arg --only a,b,c       measure these shaders only; the rest of the table is
-#                         then read from --out, so a flagged run can be redone
+#                         then read from --out, so a flagged run can be redone.
+#                         A shader with no log there is left out of the table
 # @arg --from DIR         do not run anything; build the table from the logs in DIR
 #
 # @exitcode 0 every run passed its checks
@@ -136,6 +137,7 @@ fi
 flagged=0
 resolutions=""
 rows=""
+first_log=""
 
 # The acknowledgement is what moves first when the window is occluded, or
 # when something else is drawing on the same GPU: a visible, undisturbed
@@ -152,9 +154,17 @@ for shader in $shaders; do
             exit 1
         fi
     elif [ ! -s "$log" ]; then
+        # With --only, a shader that was neither run nor measured before is
+        # simply not in the table; --from asks for the whole table and gets
+        # an error instead.
+        if [ -n "$only" ]; then
+            echo "$shader: no log in $out; left out of the table." >&2
+            continue
+        fi
         echo "$shader: no log in $out; measure it (--only $shader) or drop --from." >&2
         exit 1
     fi
+    if [ -z "$first_log" ]; then first_log="$log"; fi
 
     frames="$(sed -n 's/^frames *: *\([0-9]*\).*/\1/p' "$log")"
     elapsed="$(sed -n 's/^elapsed *: *\([0-9.]*\).*/\1/p' "$log")"
@@ -197,7 +207,11 @@ if [ "$(wc -l <<< "$distinct" | tr -d ' ')" -ne 1 ]; then
     flagged=1
 fi
 
-per_frame="$(sed -n 's/^per frame *: *//p' "$out/$(head -1 <<< "$shaders").txt")"
+if [ -z "$first_log" ]; then
+    echo "nothing was measured and $out holds no logs." >&2
+    exit 1
+fi
+per_frame="$(sed -n 's/^per frame *: *//p' "$first_log")"
 
 echo
 echo "## Setup"
@@ -206,7 +220,7 @@ echo "- $(sysctl -n machdep.cpu.brand_string), macOS $(sw_vers -productVersion)"
 echo "- Ghostty $(ghostty +version 2> /dev/null | sed -n 's/^Ghostty //p' | head -1): $(head -1 <<< "$distinct") px, $per_frame"
 echo "- Window visible on its own display and frontmost for the whole run (checked from the window server: $frontmost_check)"
 echo "- One reply per frame (\`q=0\`), 60fps target"
-echo "- \`ghostty-saver --stats --seconds $(sed -n 's/^elapsed *: *\([0-9]*\).*/\1/p' "$out/$(head -1 <<< "$shaders").txt") --shader <name>\`, run in a Ghostty window rather than a tmux pane"
+echo "- \`ghostty-saver --stats --seconds $(sed -n 's/^elapsed *: *\([0-9]*\).*/\1/p' "$first_log") --shader <name>\`, run in a Ghostty window rather than a tmux pane"
 echo "- $(date +%Y-%m-%d)"
 echo
 echo "## Results"
