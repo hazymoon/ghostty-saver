@@ -84,12 +84,75 @@ struct ShaderCatalogTests {
         #expect(program.summary == "not really random")
     }
 
-    /// Everything but the fixture is something worth locking the screen for.
-    @Test("the screensavers are the catalog without the fixtures")
-    func screensaversExcludeFixtures() {
+    /// Everything but the fixture and the drafts is something worth locking
+    /// the screen for.
+    @Test("the screensavers are the catalog without the fixtures and the drafts")
+    func screensaversExcludeFixturesAndDrafts() {
         let pool = ShaderCatalog.screensavers(in: GeneratedShaders.all)
-        #expect(pool.count == GeneratedShaders.all.count - ShaderCatalog.fixtureNames.count)
-        #expect(!pool.contains { ShaderCatalog.fixtureNames.contains($0.name) })
+        let hidden = ShaderCatalog.fixtureNames.union(ShaderCatalog.draftNames)
+        #expect(pool.count == GeneratedShaders.all.count - hidden.count)
+        #expect(!pool.contains { hidden.contains($0.name) })
+    }
+
+    /// A shader being reworked is not finished, and `random` only shows
+    /// finished work: nobody chose it, so it has to be something worth seeing.
+    @Test("random never picks a shader under rework")
+    func randomSkipsDrafts() throws {
+        for _ in 0..<200 {
+            let program = try #require(
+                ShaderCatalog.select(named: ShaderCatalog.randomName, from: GeneratedShaders.all)
+            )
+            #expect(!ShaderCatalog.draftNames.contains(program.name))
+        }
+    }
+
+    /// Hiding a shader from the list is not removing it: the work on it goes
+    /// on under its name.
+    @Test("a shader under rework still answers to its name")
+    func draftsAnswerToTheirName() throws {
+        for name in ShaderCatalog.draftNames {
+            let program = try #require(ShaderCatalog.select(named: name, from: GeneratedShaders.all))
+            #expect(program.name == name)
+        }
+    }
+
+    /// Like the fixture, a draft is kept out of the pool `random` builds for
+    /// itself, but naming it in `random-pool` is a deliberate choice.
+    @Test("a pool may name a shader under rework")
+    func poolMayNameADraft() throws {
+        let name = try #require(ShaderCatalog.draftNames.sorted().first)
+        let resolved = ShaderCatalog.resolvePool([name], in: GeneratedShaders.all)
+        #expect(resolved.pool.map(\.name) == [name])
+        #expect(resolved.unknown.isEmpty)
+    }
+
+    /// The list is a recommendation: the fixture stays on it, because it is
+    /// documented as the conversion check, and the drafts come off it.
+    @Test("the list hides the drafts and keeps the fixture")
+    func listHidesDraftsKeepsFixture() {
+        let listed = ShaderCatalog.listable(in: GeneratedShaders.all)
+        #expect(listed.count == GeneratedShaders.all.count - ShaderCatalog.draftNames.count)
+        #expect(!listed.contains { ShaderCatalog.draftNames.contains($0.name) })
+        for name in ShaderCatalog.fixtureNames {
+            #expect(listed.contains { $0.name == name }, "the fixture \(name) fell off the list")
+        }
+    }
+
+    /// The names in `draftNames` are matched against the catalog, so a
+    /// renamed or deleted shader would leave the set pointing at nothing -
+    /// and a shader that was finished and forgotten there would stay hidden.
+    @Test("every named draft is in the catalog")
+    func draftsExist() {
+        for name in ShaderCatalog.draftNames {
+            #expect(GeneratedShaders.all.contains { $0.name == name }, "no shader named \(name)")
+        }
+    }
+
+    /// A name in both sets would be two reasons for one thing to be hidden,
+    /// and the wrong one would be read.
+    @Test("a shader is a fixture or a draft, not both")
+    func fixturesAndDraftsAreDisjoint() {
+        #expect(ShaderCatalog.fixtureNames.isDisjoint(with: ShaderCatalog.draftNames))
     }
 
     /// A catalog with nothing but fixtures in it still has to answer, or
@@ -127,11 +190,12 @@ struct ShaderCatalogTests {
 
     @Test("no pool leaves random drawing from the screensavers")
     func noPoolKeepsTheDefault() throws {
+        let hidden = ShaderCatalog.fixtureNames.union(ShaderCatalog.draftNames)
         for _ in 0..<50 {
             let program = try #require(ShaderCatalog.select(
                 named: ShaderCatalog.randomName, from: GeneratedShaders.all, randomPool: nil
             ))
-            #expect(!ShaderCatalog.fixtureNames.contains(program.name))
+            #expect(!hidden.contains(program.name))
         }
     }
 

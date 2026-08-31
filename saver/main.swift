@@ -28,7 +28,11 @@ struct Options {
     var stats = false
 }
 
-let availableShaders = GeneratedShaders.all.map(\.name).joined(separator: ", ")
+// What an error message offers when a name does not match: the same list
+// `--list-shaders` shows. A shader under rework still answers to its name, but
+// is not suggested.
+let availableShaders = ShaderCatalog.listable(in: GeneratedShaders.all)
+    .map(\.name).joined(separator: ", ")
 
 let usage = """
 usage: ghostty-saver [options]
@@ -156,8 +160,9 @@ func report(_ text: String) {
 
 /// Prints the catalog, padded to the widest name so the summaries line up.
 func listShaders() -> Never {
-    let width = GeneratedShaders.all.map(\.name.count).max() ?? 0
-    for program in GeneratedShaders.all {
+    let programs = ShaderCatalog.listable(in: GeneratedShaders.all)
+    let width = programs.map(\.name.count).max() ?? 0
+    for program in programs {
         let padding = String(repeating: " ", count: width - program.name.count)
         print("\(program.name)\(padding)  \(program.summary)")
     }
