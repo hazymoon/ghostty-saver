@@ -92,9 +92,10 @@ const float YC_DELAY = 6.0;        // pixels the colour lags the luma by
 // picture the two agree and it is sharp, on a moving one every edge is
 // combed, odd lines a field behind even ones, and the picture loses
 // resolution as it moves, which is much of what VHS motion looks like.
-// Each line's scene is traced at its own field's instant, so the comb
-// costs nothing: one trace a pixel either way. Everything on the tape, the
-// noise, the head switch, the subcarrier's phase, ticks by the field too.
+// Each line's scene is traced from where the camera was at its own
+// field's instant (to first order; see Pose), so the comb costs nothing:
+// one trace a pixel either way. Everything on the tape, the noise, the
+// head switch, the subcarrier's phase, ticks by the field too.
 //
 // The comb is drawn smaller than it is. A tape's picture is soft, some
 // 333 luma samples a line, nine pixels at 4K, and the comb a walk puts on
@@ -303,6 +304,16 @@ float lookBump(float u, float start) {
          - smoothstep(start + PAUSE * 0.55, start + PAUSE - 0.2, u);
 }
 
+float smoothstepRate(float e0, float e1, float x) {
+    float f = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+    return 6.0 * f * (1.0 - f) / (e1 - e0);
+}
+
+float lookBumpRate(float u, float start) {
+    return smoothstepRate(start + 0.3, start + PAUSE * 0.5, u)
+         - smoothstepRate(start + PAUSE * 0.55, start + PAUSE - 0.2, u);
+}
+
 // Waypoint k of the walk, for any k: laps beyond the first move the whole
 // tile north.
 vec2 waypoint(float k) {
@@ -316,10 +327,13 @@ vec2 waypoint(float k) {
 // integrals are closed form and cost one waypoint per segment. The tent
 // leaves the position C2 and the tangent C1: the yaw rate never jumps.
 // `dir` is not normalised; it is shorter in a corner than on a straight,
-// and that is how fast the body is going in cells per cell of s.
-void smoothPath(float s, out vec2 pos, out vec2 dir) {
+// and that is how fast the body is going in cells per cell of s. `turn`
+// is d(dir)/ds: the tent's slope is constant either side of s, so it is
+// the mean direction ahead less the mean behind, over TURN squared.
+void smoothPath(float s, out vec2 pos, out vec2 dir, out vec2 turn) {
     pos = vec2(0.0);
     dir = vec2(0.0);
+    turn = vec2(0.0);
     float k0 = floor(s - TURN);
     float k1 = floor(s + TURN);
     vec2 w = waypoint(k0);
@@ -341,12 +355,14 @@ void smoothPath(float s, out vec2 pos, out vec2 dir) {
                 float i3 = (tb * tb * tb - ta * ta * ta) / 3.0;
                 pos += at0 * (i1 - c * i2) + d * (i2 - c * i3);
                 dir += d * (i1 - c * i2);
+                turn += d * i1 * (part == 0 ? -1.0 : 1.0);
             }
         }
         w = wn;
     }
     pos /= TURN;
     dir /= TURN;
+    turn /= TURN * TURN;
 }
 
 // --- the gait -------------------------------------------------------------
@@ -373,6 +389,11 @@ float stepSize(float n) {
 // The heel strike as a damped ring, at seconds tt after the strike.
 float ring(float tt, float tau) {
     return -exp(-tt / tau) * sin(6.2831853 * IMPACT_HZ * tt);
+}
+
+float ringRate(float tt, float tau) {
+    float w = 6.2831853 * IMPACT_HZ;
+    return exp(-tt / tau) * (sin(w * tt) / tau - w * cos(w * tt));
 }
 
 // --- the maze -------------------------------------------------------------
@@ -699,6 +720,127 @@ float timeBaseError(float t) {
     return on * sin(3.14159265 * clamp(since / WOBBLE_LENGTH, 0.0, 1.0));
 }
 
+// The camera at scene time t: the eye, the frame it looks along, the roll
+// and the pitch kick its rays get, and how fast each of those is changing.
+// All of it is a function of t alone, and t of the uniforms, and as long
+// as it is worked out once from those the compiler lifts it out of the
+// per-pixel work: measured at 4K, calling it with a time that differed by
+// the pixel's line cost a millisecond a frame, and calling it twice, once
+// for each field, cost nearly two, whichever way a pixel chose between
+// them. So it is called once, and the older field's lines move the eye
+// back along the velocity and turn the ray back by the yaw rate, which is
+// exact to first order over the eightieth of a second it has to cover.
+//
+// The rates leave out what is too small to see across a field: the
+// gait's slow wander and the random step sizes, the lean into a turn,
+// the eyes' pitch against the bob, and the turning of `side` and `ahead`
+// under the sway.
+struct Pose {
+    vec3 ro;
+    vec3 forward;
+    vec3 right;
+    vec3 up;
+    float roll;
+    float kick;
+    vec3 vel;         // metres a second the eye moves
+    float yawRate;    // radians a second the ray turns about the vertical
+    float rollRate;
+    float kickRate;
+};
+
+Pose cameraPose(float t) {
+    float u = mod(t, LAP);
+    float s = floor(t / LAP) * float(STEPS) + walked(u);
+    float moving = pace(u);
+    float sRate = walkSpeed() * moving;  // cells of s a second
+
+    // The steps. Phase 0 of a step is the heel strike; a stride is two
+    // steps. The wander is a phase modulation (see the note at BOB), and
+    // all of the gait fades out with `moving` as the camera stops.
+    float steps = s * PACE + JITTER * fbm1(t * 0.17);
+    float stepNo = floor(steps);
+    float su = steps - stepNo;
+    float strideP = fract(steps * 0.5);
+    float stepHz = PACE * walkSpeed();
+    float stepRate = PACE * sRate;       // steps a second, now
+    float sinceStrike = su / stepHz;
+
+    // The body, on the smoothed path, facing the way it moves, and going
+    // slower round a corner.
+    vec2 body, going, bending;
+    smoothPath(s, body, going, bending);
+    float heading = atan(going.x, going.y);
+    float headingRate = (going.y * bending.x - going.x * bending.y) / dot(going, going) * sRate;
+    float gait = moving * length(going);
+    // The head turns on the neck ahead of the body, and with the steps:
+    // its heading is read at an arc length warped so that d(warped)/ds =
+    // 1 + GATE * sin(2 pi step), fastest a quarter step after each heel
+    // strike, in the swing, and slowest before the next. The neck's angle
+    // is also how far into a turn the body is, for the lean.
+    float warped = s - moving * GATE / (6.2831853 * PACE) * cos(6.2831853 * su);
+    float warpedRate = sRate * (1.0 + moving * GATE * sin(6.2831853 * su));
+    vec2 unused, facing, facingBend;
+    smoothPath(warped + LEAD, unused, facing, facingBend);
+    float neck = atan(facing.x, facing.y) - heading;
+    neck = atan(sin(neck), cos(neck));
+    float neckRate = (facing.y * facingBend.x - facing.x * facingBend.y) / dot(facing, facing) * warpedRate
+        - headingRate;
+    neckRate *= step(abs(neck), NECK_MAX);  // held still at the stop
+    neck = clamp(neck, -NECK_MAX, NECK_MAX);
+    float turning = clamp(neck / 0.35, -1.0, 1.0);
+
+    // Looking around while stood still: into the dark on the first pause,
+    // back over the left shoulder, down the room it came through, on the
+    // second.
+    float look = 1.6 * lookBump(u, PAUSE1) - 1.8 * lookBump(u, PAUSE2);
+    float lookRate = 1.6 * lookBumpRate(u, PAUSE1) - 1.8 * lookBumpRate(u, PAUSE2);
+    float yaw = heading + neck + look;
+    float yawRate = headingRate + neckRate + lookRate;
+
+    // The bob: the pendulum's arc with its harmonics, and the strike's ring
+    // on top, split into what the eyes counter well and what they do not.
+    // All of it scales with the body's speed, `gait`.
+    float amp = mix(stepSize(stepNo), stepSize(stepNo + 1.0), su) * gait;
+    float arch = 1.0 / (1.0 + ARCH2 + ARCH3);
+    float bobLow = -BOB * amp * arch * cos(6.2831853 * su);
+    float bobHigh = -BOB * amp * arch * (ARCH2 * cos(12.566371 * su) + ARCH3 * cos(18.849556 * su))
+        + IMPACT * gait * ring(sinceStrike, IMPACT_TAU);
+    float bobRate = BOB * amp * arch * stepRate * (6.2831853 * sin(6.2831853 * su)
+        + ARCH2 * 12.566371 * sin(12.566371 * su) + ARCH3 * 18.849556 * sin(18.849556 * su))
+        + IMPACT * gait * ringRate(sinceStrike, IMPACT_TAU) * moving;
+    // Sideways once a stride, and into the turn; forwards with the surge.
+    float sway = SWAY * amp * sin(6.2831853 * strideP) + LEAN * moving * turning;
+    float swayRate = SWAY * amp * cos(6.2831853 * strideP) * 3.14159265 * stepRate;
+    float surge = RIPPLE * gait * walkSpeed() * CELL / (6.2831853 * stepHz) * sin(6.2831853 * su);
+    float surgeRate = RIPPLE * gait * walkSpeed() * CELL * cos(6.2831853 * su) * moving;
+    float roll = GAIT_ROLL * gait * sin(6.2831853 * strideP);
+    float rollRate = GAIT_ROLL * gait * cos(6.2831853 * strideP) * 3.14159265 * stepRate;
+    float kick = KICK * gait * ring(sinceStrike, KICK_TAU);
+    float kickRate = KICK * gait * ringRate(sinceStrike, KICK_TAU) * moving;
+    vec3 side = vec3(cos(heading), 0.0, -sin(heading));
+    vec3 ahead = vec3(sin(heading), 0.0, cos(heading));
+
+    // The eyes without the bob, NECK ahead of the neck's axis in the
+    // direction the head faces, and their target ahead of them, level
+    // with them: the walker looks down the room, not at the floor, and the
+    // barrel distortion already pulls the floor up into view. The ray
+    // starts at the bobbed eye; its direction is what the eyes think they
+    // are countering, from `known`.
+    vec3 head = vec3(body.x * CELL + CELL * 0.5, EYE, body.y * CELL + CELL * 0.5)
+        + NECK * vec3(sin(yaw), 0.0, cos(yaw));
+    vec3 shift = side * sway + ahead * surge;
+    vec3 ro = head + shift + vec3(0.0, bobLow + bobHigh, 0.0);
+    vec3 vel = vec3(going.x, 0.0, going.y) * CELL * sRate
+        + NECK * yawRate * vec3(cos(yaw), 0.0, -sin(yaw))
+        + side * swayRate + ahead * surgeRate + vec3(0.0, bobRate, 0.0);
+    vec3 known = head + shift + vec3(0.0, VOR_STEP * bobLow + VOR_HIGH * bobHigh, 0.0);
+    vec3 target = head + vec3(sin(yaw), 0.0, cos(yaw)) * GAZE;
+    vec3 forward = normalize(target - known);
+    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), forward));
+    vec3 up = cross(forward, right);
+    return Pose(ro, forward, right, up, roll, kick, vel, yawRate, rollRate, kickRate);
+}
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // Screen coordinates: y up, height 1, and the frame's aspect. fragCoord
     // grows downward here and in Ghostty alike, so it is flipped once, here.
@@ -736,7 +878,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float stale = abs(mod(line, 2.0) - mod(fieldNo, 2.0));  // 1 on the older field's lines
     float lineField = fieldNo - stale;
     float now = iTime - (fields - fieldNo) / FIELD_RATE;     // this field's instant
-    float t = droppedFrames(now) - COMB * stale / FIELD_RATE;  // a dropped frame holds both fields
+    float tNow = droppedFrames(now);  // a dropped frame holds both fields
     vec2 fseed = floor(vec2(hash11(fieldNo + 0.31), hash11(fieldNo + 0.77)) * 100.0);
 
     // Tape faults that displace whole scan lines are applied here, to the
@@ -753,78 +895,19 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     uv *= 1.0 + BARREL * r2;
 
     // --- the camera --------------------------------------------------------
-    float u = mod(t, LAP);
-    float s = floor(t / LAP) * float(STEPS) + walked(u);
-    float moving = pace(u);
-
-    // The steps. Phase 0 of a step is the heel strike; a stride is two
-    // steps. The wander is a phase modulation (see the note at BOB), and
-    // all of the gait fades out with `moving` as the camera stops.
-    float steps = s * PACE + JITTER * fbm1(t * 0.17);
-    float stepNo = floor(steps);
-    float su = steps - stepNo;
-    float strideP = fract(steps * 0.5);
-    float stepHz = PACE * walkSpeed();
-    float sinceStrike = su / stepHz;
-
-    // The body, on the smoothed path, facing the way it moves, and going
-    // slower round a corner.
-    vec2 body, going;
-    smoothPath(s, body, going);
-    float heading = atan(going.x, going.y);
-    float gait = moving * length(going);
-    // The head turns on the neck ahead of the body, and with the steps:
-    // its heading is read at an arc length warped so that d(warped)/ds =
-    // 1 + GATE * sin(2 pi step), fastest a quarter step after each heel
-    // strike, in the swing, and slowest before the next. The neck's angle
-    // is also how far into a turn the body is, for the lean.
-    float warped = s - moving * GATE / (6.2831853 * PACE) * cos(6.2831853 * su);
-    vec2 unused, facing;
-    smoothPath(warped + LEAD, unused, facing);
-    float neck = atan(facing.x, facing.y) - heading;
-    neck = clamp(atan(sin(neck), cos(neck)), -NECK_MAX, NECK_MAX);
-    float turning = clamp(neck / 0.35, -1.0, 1.0);
-
-    // Looking around while stood still: into the dark on the first pause,
-    // back over the left shoulder, down the room it came through, on the
-    // second.
-    float look = 1.6 * lookBump(u, PAUSE1) - 1.8 * lookBump(u, PAUSE2);
-    float yaw = heading + neck + look;
-
-    // The bob: the pendulum's arc with its harmonics, and the strike's ring
-    // on top, split into what the eyes counter well and what they do not.
-    // All of it scales with the body's speed, `gait`.
-    float amp = mix(stepSize(stepNo), stepSize(stepNo + 1.0), su) * gait;
-    float arch = 1.0 / (1.0 + ARCH2 + ARCH3);
-    float bobLow = -BOB * amp * arch * cos(6.2831853 * su);
-    float bobHigh = -BOB * amp * arch * (ARCH2 * cos(12.566371 * su) + ARCH3 * cos(18.849556 * su))
-        + IMPACT * gait * ring(sinceStrike, IMPACT_TAU);
-    // Sideways once a stride, and into the turn; forwards with the surge.
-    float sway = SWAY * amp * sin(6.2831853 * strideP) + LEAN * moving * turning;
-    float surge = RIPPLE * gait * walkSpeed() * CELL / (6.2831853 * stepHz) * sin(6.2831853 * su);
-    float roll = GAIT_ROLL * gait * sin(6.2831853 * strideP);
-    float kick = KICK * gait * ring(sinceStrike, KICK_TAU);
-    vec3 side = vec3(cos(heading), 0.0, -sin(heading));
-    vec3 ahead = vec3(sin(heading), 0.0, cos(heading));
-
-    // The eyes without the bob, NECK ahead of the neck's axis in the
-    // direction the head faces, and their target ahead of them, level
-    // with them: the walker looks down the room, not at the floor, and the
-    // barrel distortion already pulls the floor up into view. The ray
-    // starts at the bobbed eye; its direction is what the eyes think they
-    // are countering, from `known`.
-    vec3 head = vec3(body.x * CELL + CELL * 0.5, EYE, body.y * CELL + CELL * 0.5)
-        + NECK * vec3(sin(yaw), 0.0, cos(yaw));
-    vec3 shift = side * sway + ahead * surge;
-    vec3 ro = head + shift + vec3(0.0, bobLow + bobHigh, 0.0);
-    vec3 known = head + shift + vec3(0.0, VOR_STEP * bobLow + VOR_HIGH * bobHigh, 0.0);
-    vec3 target = head + vec3(sin(yaw), 0.0, cos(yaw)) * GAZE;
-    vec3 forward = normalize(target - known);
-    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), forward));
-    vec3 up = cross(forward, right);
-    vec2 ruv = vec2(uv.x * cos(roll) - uv.y * sin(roll), uv.x * sin(roll) + uv.y * cos(roll));
-    ruv.y += FOCAL * kick;
-    vec3 rd = normalize(forward * FOCAL + right * ruv.x + up * ruv.y);
+    // Once, at the newer field's time; the older field's lines are moved
+    // back along its rates (see the note at Pose).
+    Pose cam = cameraPose(tNow);
+    float back = -COMB * stale / FIELD_RATE;  // seconds this line is behind
+    vec3 ro = cam.ro + cam.vel * back;
+    vec2 ruv = vec2(uv.x * cos(cam.roll) - uv.y * sin(cam.roll), uv.x * sin(cam.roll) + uv.y * cos(cam.roll));
+    ruv += cam.rollRate * back * vec2(-ruv.y, ruv.x);
+    ruv.y += FOCAL * (cam.kick + cam.kickRate * back);
+    vec3 rd = normalize(cam.forward * FOCAL + cam.right * ruv.x + cam.up * ruv.y);
+    // Turned back about the vertical, to first order: the angle is under a
+    // hundredth of a radian, and the length it adds is nothing the trace
+    // notices.
+    rd += cam.yawRate * back * vec3(rd.z, 0.0, -rd.x);
 
     // --- the scene ---------------------------------------------------------
     int id;
@@ -832,8 +915,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float dist = trace(ro, rd, id, n);
     vec3 p = ro + rd * dist;
     vec3 emission;
-    vec3 albedo = surface(p, id, n, t, emission);
-    vec3 col = albedo * (lighting(p, n, t) + vec3(0.012)) + emission;
+    // The tubes' stutter is read at the newer field on every line: a 16 Hz
+    // flicker a sixtieth of a second off is nothing anyone sees, and it
+    // keeps the time out of the per-pixel work.
+    vec3 albedo = surface(p, id, n, tNow, emission);
+    vec3 col = albedo * (lighting(p, n, tNow) + vec3(0.012)) + emission;
     float fog = exp(-dist * 0.075);
     col = mix(FOG_COLOR, col, fog);
 
