@@ -43,8 +43,10 @@ const int MAX_CELLS = 24;          // DDA steps before a ray gives up in fog: 96
 // How often things happen. A bad tube has a fit with probability
 // FIT_CHANCE in every FIT_SLOT seconds; the deck drops a frame with
 // probability DROP_CHANCE in every DROP_SLOT seconds; a tracking band rolls
-// with probability BAND_CHANCE in every BAND_SLOT seconds. All of them are
-// rare: the walk should be dull, and a fault is an event.
+// with probability BAND_CHANCE in every BAND_SLOT seconds; the deck's
+// servo loses the time base with probability WOBBLE_CHANCE in every
+// WOBBLE_SLOT seconds. All of them are rare: the walk should be dull, and
+// a fault is an event.
 const float FIT_SLOT = 10.0;
 const float FIT_CHANCE = 0.15;
 const float FIT_LENGTH = 0.7;      // seconds a fit lasts
@@ -54,6 +56,10 @@ const float DROP_HOLD = 0.25;      // seconds the picture freezes
 const float BAND_SLOT = 10.0;
 const float BAND_CHANCE = 0.2;
 const float BAND_ROLL = 2.0;       // seconds the band takes to roll through
+const float WOBBLE_SLOT = 12.0;
+const float WOBBLE_CHANCE = 0.25;
+const float WOBBLE_LENGTH = 4.0;   // seconds the ripple takes to swell and die
+const float WOBBLE = 0.0012;       // of the picture's height the verticals ripple by, at most
 
 // The tape's colour. VHS records luma as FM, which suppresses noise above
 // its threshold, and colour as AM on a 629 kHz subcarrier, which does not;
@@ -679,6 +685,20 @@ float trackingBand(float y, float t) {
     return rolling * (1.0 - smoothstep(width * 0.5, width, d));
 }
 
+// Time-base error: the tape's tension wanders, each line starts a little
+// early or late, and the picture's verticals ripple. The deck's servo
+// holds it most of the time and loses it now and then, for WOBBLE_LENGTH
+// seconds somewhere in a WOBBLE_SLOT that draws it, the ripple swelling
+// and dying away. Returns its strength at time t.
+float timeBaseError(float t) {
+    float slot = floor(t / WOBBLE_SLOT);
+    float h = hash11(slot * 5.7 + 3.3);
+    float start = slot * WOBBLE_SLOT + hash11(slot * 2.9 + 1.7) * (WOBBLE_SLOT - WOBBLE_LENGTH);
+    float since = t - start;
+    float on = step(h, WOBBLE_CHANCE) * step(0.0, since) * step(since, WOBBLE_LENGTH);
+    return on * sin(3.14159265 * clamp(since / WOBBLE_LENGTH, 0.0, 1.0));
+}
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // Screen coordinates: y up, height 1, and the frame's aspect. fragCoord
     // grows downward here and in Ghostty alike, so it is flipped once, here.
@@ -725,7 +745,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float bandShift = band * (0.05 + 0.04 * hash11(floor(screenY * 90.0) + fseed.x));
     float headSwitch = 1.0 - smoothstep(0.0, 0.03, screenY);
     float headShift = headSwitch * 0.03 * (fseed.y * 0.01 - 0.5);
-    float wobble = 0.0012 * sin(screenY * 37.0 + now * 21.0) * (0.5 + 0.5 * sin(now * 0.7));
+    float wobble = WOBBLE * sin(screenY * 37.0 + now * 21.0) * timeBaseError(now);
     uv.x += bandShift + headShift + wobble;
 
     // The lens: barrel distortion, then a wide field of view.
