@@ -70,21 +70,53 @@ const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 // - No motion at all between 0.1 and 0.4 Hz, the band where motion
 //   sickness peaks (Golding 2001; Diels & Howarth 2013). A slow "drift" on
 //   yaw, pitch, roll or position is exactly that band, so there is none.
+//   The gait's unevenness is a phase modulation of the steps, which puts
+//   sidebands round the step rate and nothing at the modulating rate.
 // - The footstep bob and sway move the camera's position only, never its
 //   angle: a rotational bob sweeps the whole image and drives vection.
 // - The eyes counter the bob (the vestibulo-ocular reflex): the camera
 //   keeps looking at a point GAZE metres ahead of where the head would be
 //   without the bob, so the far wall stands still and only the near walls
-//   show the step, as parallax.
+//   show the step, as parallax. The reflex's gain falls with frequency,
+//   so the step's fundamental is countered by VOR_STEP and its harmonics
+//   and the heel strike by only VOR_HIGH: the strike leaks into the
+//   picture a little, which is what makes a step feel like a footfall
+//   rather than a swell.
 // - Roll is a fraction of a degree with each stride, and never on a turn.
+//   Leaning into a turn is a lateral shift of LEAN instead.
 // - Turns are spread over TURN cells of the path so the yaw rate stays
 //   under about 30 degrees a second, and the looks in the pauses under 60.
+//
+// And a person's gait is not a metronome, or a sine wave. The steps are
+// uneven (JITTER, ASYM, STEP_JITTER), the rise of each is the arc of an
+// inverted pendulum, flat at the top and sharp at the bottom (ARCH2,
+// ARCH3), each heel strike rings for a few hundredths of a second (IMPACT,
+// KICK), the pace surges at each strike and slows over the stance
+// (RIPPLE), and the head turns with the stride rather than at a steady
+// rate: its yaw oscillates at half the step rate, in phase with the sway
+// (GATE), and leads the body into a corner by about a second (LEAD).
 const float BOB = 0.025;           // metres, vertical, once a step
 const float SWAY = 0.020;          // metres, lateral, once a stride
 const float GAIT_ROLL = 0.007;     // radians, once a stride
 const float GAZE = 6.0;            // metres ahead, where the eyes fix
+const float VOR_STEP = 0.75;       // share of the step's fundamental the eyes counter
+const float VOR_HIGH = 0.5;        // share of the harmonics and the strike
 const float TURN = 1.5;            // cells over which a corner is turned
 const float CORNER = 0.4;          // cells either side of a corner the path cuts
+const float LEAD = 0.25;           // cells the head looks ahead of the body
+const float LEAN = 0.025;          // metres shifted into a turn
+const float GATE = 0.65;           // depth of the stride's modulation of the yaw rate
+const float ARCH2 = 0.20;          // second and third harmonics of the bob
+const float ARCH3 = 0.05;
+const float IMPACT = 0.004;        // metres the heel strike rings by
+const float IMPACT_TAU = 0.07;     // seconds it takes to die away (>= 3 frames)
+const float IMPACT_HZ = 9.0;       // and how fast it rings
+const float KICK = 0.0017;         // radians of pitch the strike knocks in, uncountered
+const float KICK_TAU = 0.08;
+const float RIPPLE = 0.05;         // fraction the pace surges by at each strike
+const float JITTER = 0.22;         // steps of slow phase wander in the gait
+const float ASYM = 0.03;           // one leg's bob over the other's
+const float STEP_JITTER = 0.06;    // random size of each step's bob
 
 // A 1990s camcorder at the wide end of its zoom is not wide: about 45
 // degrees across, 55 to 65 with the wide converter Kane Pixels' footage
@@ -158,9 +190,12 @@ float stoodStill(float u, float start) {
 // exactly STEPS, so the seam between laps is continuous in position and in
 // speed. Lap-time, not iTime: stoodStill saturates after its pause, so fed
 // absolute time the pauses would only ever happen once.
+float walkSpeed() {
+    return float(STEPS) / (LAP - 2.0 * (PAUSE - EASE));
+}
+
 float walked(float u) {
-    float speed = float(STEPS) / (LAP - 2.0 * (PAUSE - EASE));
-    return speed * (u - stoodStill(u, PAUSE1) - stoodStill(u, PAUSE2));
+    return walkSpeed() * (u - stoodStill(u, PAUSE1) - stoodStill(u, PAUSE2));
 }
 
 // Fraction of walking pace at lap-time u: 1 on the move, 0 mid-pause. Drives
@@ -192,17 +227,50 @@ vec2 onPath(float s) {
     return mix(a, b, f) + vec2(0.0, lap * SUPER);
 }
 
-// Where the camera faces at arc length s: the path's tangent, averaged over
-// a tent of TURN cells centred a little ahead. A corner turned this way has
-// no jump in the yaw rate at either end and peaks at about 4 / TURN radians
+// Where the head faces at arc length s: the path's tangent, averaged over
+// a tent of TURN cells centred LEAD cells ahead, since the head turns into
+// a corner before the body reaches it. A corner turned this way has no
+// jump in the yaw rate at either end and peaks at about 4 / TURN radians
 // per cell in the middle, 30 degrees a second at the walking speed.
 float headingAt(float s) {
     vec2 dir = vec2(0.0);
     for (int k = -2; k <= 2; k++) {
-        float x = s + 0.2 + float(k) * TURN * 0.2;
+        float x = s + LEAD + float(k) * TURN * 0.2;
         dir += (3.0 - abs(float(k))) * (onPath(x + TURN * 0.1) - onPath(x - TURN * 0.1));
     }
     return atan(dir.x, dir.y);
+}
+
+// Turning rate of the head, in radians per cell, at arc length s.
+float turnRate(float s) {
+    float d = headingAt(s + 0.05) - headingAt(s - 0.05);
+    return atan(sin(d), cos(d)) / 0.1;
+}
+
+// --- the gait -------------------------------------------------------------
+
+// Value noise on a line, and three octaves of it, in [-0.5, 0.5].
+float noise1(float x) {
+    float i = floor(x);
+    float f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(hash11(i), hash11(i + 1.0), f);
+}
+
+float fbm1(float x) {
+    return 0.55 * noise1(x) + 0.30 * noise1(x * 2.1 + 7.3) + 0.15 * noise1(x * 4.3 + 19.1) - 0.5;
+}
+
+// How high step n bobs, relative to an average step: one leg over the
+// other, and a little at random.
+float stepSize(float n) {
+    float side = mod(n, 2.0) < 0.5 ? 1.0 : -1.0;
+    return 1.0 + ASYM * side + (hash11(n * 7.13) - 0.5) * 2.0 * STEP_JITTER;
+}
+
+// The heel strike as a damped ring, at seconds tt after the strike.
+float ring(float tt, float tau) {
+    return -exp(-tt / tau) * sin(6.2831853 * IMPACT_HZ * tt);
 }
 
 // --- the maze -------------------------------------------------------------
@@ -490,9 +558,27 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // --- the camera --------------------------------------------------------
     float u = mod(t, LAP);
     float s = floor(t / LAP) * float(STEPS) + walked(u);
+    float moving = pace(u);
+
+    // The steps. Phase 0 of a step is the heel strike; a stride is two
+    // steps. The wander is a phase modulation (see the note at BOB), and
+    // all of the gait fades out with `moving` as the camera stops.
+    float steps = s * PACE + JITTER * fbm1(t * 0.17);
+    float stepNo = floor(steps);
+    float su = steps - stepNo;
+    float strideP = fract(steps * 0.5);
+    float stepHz = PACE * walkSpeed();
+    float sinceStrike = su / stepHz;
+    float amp = mix(stepSize(stepNo), stepSize(stepNo + 1.0), su) * moving;
+
     // Rounded corners: the average of a point behind and a point ahead.
     vec2 pos2 = 0.5 * (onPath(s - CORNER) + onPath(s + CORNER));
-    float heading = headingAt(s);
+    // The head turns with the stride: its heading is read at an arc length
+    // warped so that d(warped)/ds = 1 + GATE * sin(2 pi stride), fastest
+    // when the sway peaks and slowest half a stride later.
+    float warped = s - moving * GATE / (3.14159265 * PACE) * cos(6.2831853 * strideP);
+    float heading = headingAt(warped);
+    float turning = clamp(turnRate(warped) / 1.5, -1.0, 1.0);
 
     // Looking around while stood still: into the dark on the first pause,
     // back over the left shoulder, down the room it came through, on the
@@ -500,26 +586,35 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float look = 1.6 * lookBump(u, PAUSE1) - 1.8 * lookBump(u, PAUSE2);
     float yaw = heading + look;
 
-    // The footsteps: a bob once a step and a sway and a slight roll once a
-    // stride, all fading out as the camera stops. Position only; see the
-    // note at BOB for why there is no drift and no rotational bob.
-    float moving = pace(u);
-    float stride = s * PACE * 3.14159265;  // half a turn per footstep
-    float bob = BOB * moving * sin(stride * 2.0);
-    float sway = SWAY * moving * sin(stride);
-    float roll = GAIT_ROLL * moving * sin(stride);
-    vec2 side = vec2(cos(heading), -sin(heading));
+    // The bob: the pendulum's arc with its harmonics, and the strike's ring
+    // on top, split into what the eyes counter well and what they do not.
+    float arch = 1.0 / (1.0 + ARCH2 + ARCH3);
+    float bobLow = -BOB * amp * arch * cos(6.2831853 * su);
+    float bobHigh = -BOB * amp * arch * (ARCH2 * cos(12.566371 * su) + ARCH3 * cos(18.849556 * su))
+        + IMPACT * moving * ring(sinceStrike, IMPACT_TAU);
+    // Sideways once a stride, and into the turn; forwards with the surge.
+    float sway = SWAY * amp * sin(6.2831853 * strideP) + LEAN * moving * turning;
+    float surge = RIPPLE * moving * walkSpeed() * CELL / (6.2831853 * stepHz) * sin(6.2831853 * su);
+    float roll = GAIT_ROLL * moving * sin(6.2831853 * strideP);
+    float kick = KICK * moving * ring(sinceStrike, KICK_TAU);
+    vec3 side = vec3(cos(heading), 0.0, -sin(heading));
+    vec3 ahead = vec3(sin(heading), 0.0, cos(heading));
 
     // The head without the bob, and the eyes' target ahead of it, level
     // with it: the walker looks down the room, not at the floor, and the
-    // barrel distortion already pulls the floor up into view.
+    // barrel distortion already pulls the floor up into view. The ray
+    // starts at the bobbed eye; its direction is what the eyes think they
+    // are countering, from `known`.
     vec3 head = vec3(pos2.x * CELL + CELL * 0.5, EYE, pos2.y * CELL + CELL * 0.5);
-    vec3 ro = head + vec3(side.x * sway, bob, side.y * sway);
+    vec3 shift = side * sway + ahead * surge;
+    vec3 ro = head + shift + vec3(0.0, bobLow + bobHigh, 0.0);
+    vec3 known = head + shift + vec3(0.0, VOR_STEP * bobLow + VOR_HIGH * bobHigh, 0.0);
     vec3 target = head + vec3(sin(yaw), 0.0, cos(yaw)) * GAZE;
-    vec3 forward = normalize(target - ro);
+    vec3 forward = normalize(target - known);
     vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), forward));
     vec3 up = cross(forward, right);
     vec2 ruv = vec2(uv.x * cos(roll) - uv.y * sin(roll), uv.x * sin(roll) + uv.y * cos(roll));
+    ruv.y += FOCAL * kick;
     vec3 rd = normalize(forward * FOCAL + right * ruv.x + up * ruv.y);
 
     // --- the scene ---------------------------------------------------------
