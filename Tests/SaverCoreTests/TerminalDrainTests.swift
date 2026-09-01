@@ -178,7 +178,11 @@ struct ContendedReadTests {
 /// the terminal a question after them and waits for the answer: a terminal
 /// processes what it is sent in order, so the answer arriving means the delete
 /// and the alt-screen exit were processed before it.
-@Suite("confirming the terminal processed the exit sequence")
+/// Serialized: each test here runs a terminal of its own on a thread that can
+/// outlive it, and a descriptor number freed by one is handed to the next.
+/// Run in parallel they also compete for the moment the query is written,
+/// which is what the timings below are measuring.
+@Suite("confirming the terminal processed the exit sequence", .serialized)
 struct TerminalCatchUpTests {
     /// A pty with the reader's descriptor opened the way the screensaver opens
     /// it: a second open of the device, non-blocking, separate from the one
@@ -215,9 +219,14 @@ struct TerminalCatchUpTests {
             self.reader = reader
         }
 
-        func send(_ text: String) {
+        /// False once the pty is closed, which is how a thread that outlives
+        /// its test finds out: the descriptor number is about to be handed to
+        /// another test's terminal, and writing to it there is a byte nobody
+        /// can account for.
+        @discardableResult
+        func send(_ text: String) -> Bool {
             let bytes = Array(text.utf8)
-            _ = bytes.withUnsafeBufferPointer { write(master, $0.baseAddress, $0.count) }
+            return bytes.withUnsafeBufferPointer { write(master, $0.baseAddress, $0.count) } > 0
         }
 
         /// What the screensaver wrote, as the terminal would see it.
@@ -230,16 +239,28 @@ struct TerminalCatchUpTests {
             return String(decoding: buffer[0..<n], as: UTF8.self)
         }
 
+        /// Waits for the query the exit path sends. False when it never came,
+        /// which is the terminal side of a test that is already failing.
+        ///
+        /// A quiet second is not an answer to that: these run in parallel, and
+        /// a loaded machine can take longer than that to get the waiting
+        /// thread as far as the write. So it waits on a deadline of its own,
+        /// generous enough that reaching it means the query is not coming.
+        private func awaitQuery(within seconds: Double = 10.0) -> Bool {
+            let deadline = monotonicNow() + seconds
+            var seen = ""
+            while !seen.contains("\u{1b}[c") {
+                if monotonicNow() >= deadline { return false }
+                seen += receive(within: 0.5)
+            }
+            return true
+        }
+
         /// Plays the terminal: answers the primary DA query when it shows up,
         /// in as many writes as asked for, so the answer can straddle reads.
         func answerDeviceAttributes(after preamble: String = "", inPieces pieces: Int = 1) {
             Thread.detachNewThread {
-                var seen = ""
-                while !seen.contains("\u{1b}[c") {
-                    let chunk = receive(within: 1.0)
-                    if chunk.isEmpty { return }
-                    seen += chunk
-                }
+                guard awaitQuery() else { return }
                 let answer = Array((preamble + "\u{1b}[?62;22c").utf8)
                 let size = max(1, answer.count / pieces)
                 var offset = 0
@@ -248,6 +269,34 @@ struct TerminalCatchUpTests {
                     send(String(decoding: answer[offset..<end], as: UTF8.self))
                     offset = end
                     Thread.sleep(forTimeInterval: 0.02)
+                }
+            }
+        }
+
+        /// Plays a terminal that is behind rather than gone: it keeps replying
+        /// to what it was sent earlier while it works through the backlog, and
+        /// only answers the query once it has caught up.
+        func answerDeviceAttributes(afterChattering rounds: Int, every interval: TimeInterval) {
+            Thread.detachNewThread {
+                guard awaitQuery() else { return }
+                for _ in 0..<rounds {
+                    Thread.sleep(forTimeInterval: interval)
+                    guard send("\u{1b}_Gi=1,p=1;OK\u{1b}\\") else { return }
+                }
+                send("\u{1b}[?62;22;52c")
+            }
+        }
+
+        /// Plays a terminal that talks without ever answering, which is the
+        /// one shape a wait that extends on every byte could sit in forever.
+        /// It stops at the close, and counts its rounds as well, so a test
+        /// that ends first is not left with a thread still talking.
+        func chatterWithoutAnswering(rounds: Int = 40, every interval: TimeInterval = 0.05) {
+            Thread.detachNewThread {
+                guard awaitQuery() else { return }
+                for _ in 0..<rounds {
+                    Thread.sleep(forTimeInterval: interval)
+                    guard send("\u{1b}_Gi=1,p=1;OK\u{1b}\\") else { return }
                 }
             }
         }
@@ -264,16 +313,18 @@ struct TerminalCatchUpTests {
         }
     }
 
-    private func runCatchUp(_ pty: Pty, timeout: TimeInterval) -> TerminalSession.CatchUp? {
+    private func runCatchUp(
+        _ pty: Pty, quietFor: TimeInterval, limit: TimeInterval = 5.0
+    ) -> TerminalSession.CatchUp? {
         let done = DispatchSemaphore(value: 0)
         var outcome: TerminalSession.CatchUp?
         Thread.detachNewThread {
             outcome = TerminalSession.awaitTerminalCatchUp(
-                outputFD: pty.slave, inputFD: pty.reader, timeout: timeout
+                outputFD: pty.slave, inputFD: pty.reader, quietFor: quietFor, limit: limit
             )
             done.signal()
         }
-        guard done.wait(timeout: .now() + timeout + 2.0) == .success else { return nil }
+        guard done.wait(timeout: .now() + limit + 2.0) == .success else { return nil }
         return outcome
     }
 
@@ -284,7 +335,7 @@ struct TerminalCatchUpTests {
 
         pty.answerDeviceAttributes()
         let start = monotonicNow()
-        #expect(runCatchUp(pty, timeout: 2.0) == .confirmed)
+        #expect(runCatchUp(pty, quietFor: 2.0) == .confirmed)
         #expect(monotonicNow() - start < 1.0, "it should return as soon as the answer lands")
     }
 
@@ -296,7 +347,7 @@ struct TerminalCatchUpTests {
         defer { pty.close() }
 
         pty.answerDeviceAttributes(after: "\u{1b}_Gi=1;OK\u{1b}\\q\u{1b}[A")
-        #expect(runCatchUp(pty, timeout: 2.0) == .confirmed)
+        #expect(runCatchUp(pty, quietFor: 2.0) == .confirmed)
     }
 
     @Test("an answer that arrives in pieces is still found")
@@ -305,7 +356,21 @@ struct TerminalCatchUpTests {
         defer { pty.close() }
 
         pty.answerDeviceAttributes(after: "\u{1b}_Gi=1;OK\u{1b}\\", inPieces: 7)
-        #expect(runCatchUp(pty, timeout: 2.0) == .confirmed)
+        #expect(runCatchUp(pty, quietFor: 2.0) == .confirmed)
+    }
+
+    /// A terminal that is behind is not a terminal that has gone away: it is
+    /// still replying to what it was sent, and the answer is behind that.
+    /// Giving up in the middle leaves the rest - the last frame's reply, then
+    /// the answer - to arrive after the flush, where it is typed into whatever
+    /// reads the terminal next.
+    @Test("a terminal that is behind is followed until it answers")
+    func confirmedAfterABacklog() throws {
+        let pty = try #require(Pty())
+        defer { pty.close() }
+
+        pty.answerDeviceAttributes(afterChattering: 9, every: 0.1)
+        #expect(runCatchUp(pty, quietFor: 0.3) == .confirmed)
     }
 
     @Test("a terminal that never answers is given up on within the deadline")
@@ -314,11 +379,26 @@ struct TerminalCatchUpTests {
         defer { pty.close() }
 
         let start = monotonicNow()
-        #expect(runCatchUp(pty, timeout: 0.3) == .unanswered)
+        #expect(runCatchUp(pty, quietFor: 0.3) == .unanswered)
         // The deadline is kept to the millisecond poll() takes, so the wait
         // can come back a fraction of one early.
         let took = monotonicNow() - start
         #expect(took >= 0.29 && took < 1.0, "took \(took) s")
+    }
+
+    /// The silence restarting on every byte still has to end somewhere. A
+    /// terminal that talks without ever answering is the one shape that would
+    /// otherwise hold the exit path open for as long as it kept talking.
+    @Test("a terminal that talks without answering is given up on at the limit")
+    func unansweredWhileTalking() throws {
+        let pty = try #require(Pty())
+        defer { pty.close() }
+
+        pty.chatterWithoutAnswering()
+        let start = monotonicNow()
+        #expect(runCatchUp(pty, quietFor: 0.3, limit: 0.6) == .unanswered)
+        let took = monotonicNow() - start
+        #expect(took >= 0.59 && took < 1.5, "took \(took) s")
     }
 
     /// The fallback when the reader is the shell's own blocking descriptor:
@@ -332,7 +412,7 @@ struct TerminalCatchUpTests {
         pty.send("\u{1b}_Gi=1;OK\u{1b}\\")
         #expect(pty.readerHasQueuedInput)
 
-        #expect(runCatchUp(pty, timeout: 1.0) == .notAsked)
+        #expect(runCatchUp(pty, quietFor: 1.0) == .notAsked)
         #expect(pty.readerHasQueuedInput, "the reply should still be there to flush")
         #expect(pty.receive(within: 0.2).isEmpty, "no query should have reached the terminal")
     }
