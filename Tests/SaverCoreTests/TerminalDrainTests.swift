@@ -178,7 +178,11 @@ struct ContendedReadTests {
 /// the terminal a question after them and waits for the answer: a terminal
 /// processes what it is sent in order, so the answer arriving means the delete
 /// and the alt-screen exit were processed before it.
-@Suite("confirming the terminal processed the exit sequence")
+/// Serialized: each test here runs a terminal of its own on a thread that can
+/// outlive it, and a descriptor number freed by one is handed to the next.
+/// Run in parallel they also compete for the moment the query is written,
+/// which is what the timings below are measuring.
+@Suite("confirming the terminal processed the exit sequence", .serialized)
 struct TerminalCatchUpTests {
     /// A pty with the reader's descriptor opened the way the screensaver opens
     /// it: a second open of the device, non-blocking, separate from the one
@@ -215,9 +219,14 @@ struct TerminalCatchUpTests {
             self.reader = reader
         }
 
-        func send(_ text: String) {
+        /// False once the pty is closed, which is how a thread that outlives
+        /// its test finds out: the descriptor number is about to be handed to
+        /// another test's terminal, and writing to it there is a byte nobody
+        /// can account for.
+        @discardableResult
+        func send(_ text: String) -> Bool {
             let bytes = Array(text.utf8)
-            _ = bytes.withUnsafeBufferPointer { write(master, $0.baseAddress, $0.count) }
+            return bytes.withUnsafeBufferPointer { write(master, $0.baseAddress, $0.count) } > 0
         }
 
         /// What the screensaver wrote, as the terminal would see it.
@@ -230,14 +239,19 @@ struct TerminalCatchUpTests {
             return String(decoding: buffer[0..<n], as: UTF8.self)
         }
 
-        /// Waits for the query the exit path sends. False when nothing came,
+        /// Waits for the query the exit path sends. False when it never came,
         /// which is the terminal side of a test that is already failing.
-        private func awaitQuery() -> Bool {
+        ///
+        /// A quiet second is not an answer to that: these run in parallel, and
+        /// a loaded machine can take longer than that to get the waiting
+        /// thread as far as the write. So it waits on a deadline of its own,
+        /// generous enough that reaching it means the query is not coming.
+        private func awaitQuery(within seconds: Double = 10.0) -> Bool {
+            let deadline = monotonicNow() + seconds
             var seen = ""
             while !seen.contains("\u{1b}[c") {
-                let chunk = receive(within: 1.0)
-                if chunk.isEmpty { return false }
-                seen += chunk
+                if monotonicNow() >= deadline { return false }
+                seen += receive(within: 0.5)
             }
             return true
         }
@@ -267,7 +281,7 @@ struct TerminalCatchUpTests {
                 guard awaitQuery() else { return }
                 for _ in 0..<rounds {
                     Thread.sleep(forTimeInterval: interval)
-                    send("\u{1b}_Gi=1,p=1;OK\u{1b}\\")
+                    guard send("\u{1b}_Gi=1,p=1;OK\u{1b}\\") else { return }
                 }
                 send("\u{1b}[?62;22;52c")
             }
@@ -275,14 +289,14 @@ struct TerminalCatchUpTests {
 
         /// Plays a terminal that talks without ever answering, which is the
         /// one shape a wait that extends on every byte could sit in forever.
-        /// The rounds are counted so the thread stops on its own once the
-        /// test that started it has gone.
-        func chatterWithoutAnswering(rounds: Int = 400, every interval: TimeInterval = 0.05) {
+        /// It stops at the close, and counts its rounds as well, so a test
+        /// that ends first is not left with a thread still talking.
+        func chatterWithoutAnswering(rounds: Int = 40, every interval: TimeInterval = 0.05) {
             Thread.detachNewThread {
                 guard awaitQuery() else { return }
                 for _ in 0..<rounds {
                     Thread.sleep(forTimeInterval: interval)
-                    send("\u{1b}_Gi=1,p=1;OK\u{1b}\\")
+                    guard send("\u{1b}_Gi=1,p=1;OK\u{1b}\\") else { return }
                 }
             }
         }
