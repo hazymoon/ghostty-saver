@@ -30,7 +30,8 @@ private var termiosRestored = false
 private let deviceAttributesQuery: [UInt8] = Array("\u{1b}[c".utf8)
 private let unconfirmedExitNotice: [UInt8] = Array((
     "ghostty-saver: the terminal did not confirm the exit sequence in time; "
-    + "if the last frame is still showing, that is why\r\n"
+    + "if the last frame is still showing, that is why, and anything it says "
+    + "from here lands as stray text in whatever reads the terminal next\r\n"
 ).utf8)
 
 // Set from a signal handler, so it has to be a type the handler may touch.
@@ -189,7 +190,20 @@ public enum TerminalSession {
         // TCSAFLUSH only discards what has already arrived, so this doubles
         // as letting that land first, otherwise it turns up on the shell
         // prompt as stray text.
-        if awaitTerminalCatchUp(outputFD: outputDescriptor, inputFD: inputDescriptor, timeout: 2.0) == .unanswered {
+        // Five seconds of silence rather than the two this used to allow, and
+        // the clock restarts on every byte. The wait ends the moment the
+        // answer lands, so the budget is only ever spent on a terminal that
+        // has gone quiet, and what it buys is the difference between a slow
+        // exit and a reply that arrives after the flush - which is typed into
+        // whatever reads the terminal next, a shell prompt or the program
+        // that was waiting behind the lock. A terminal that is gone rather
+        // than quiet is not waited for at all: poll says so at once.
+        if awaitTerminalCatchUp(
+            outputFD: outputDescriptor,
+            inputFD: inputDescriptor,
+            quietFor: 5.0,
+            limit: 15.0
+        ) == .unanswered {
             unconfirmedExitNotice.withUnsafeBufferPointer {
                 _ = Darwin.write(STDERR_FILENO, $0.baseAddress, $0.count)
             }
@@ -223,6 +237,13 @@ public enum TerminalSession {
     /// Sends a primary device attributes query (`CSI c`) and waits for the
     /// answer (`CSI ? ... c`), reading and discarding whatever precedes it.
     ///
+    /// `quietFor` is how long the terminal has to say nothing before it is
+    /// given up on, counted from the last byte rather than from the start: a
+    /// terminal working through a backlog is replying to what it was sent all
+    /// the while, and the answer is behind that. `limit` bounds the whole
+    /// wait, for the one shape that would otherwise never end - a terminal
+    /// that talks without ever answering.
+    ///
     /// Only reads when `inputFD` is non-blocking. The terminal is in raw mode
     /// with VMIN 1 while the screensaver runs, where a read that finds nothing
     /// waits for as long as the terminal takes to say something - and it can
@@ -235,7 +256,12 @@ public enum TerminalSession {
     /// this only waits, briefly, for whatever is already on its way.
     ///
     /// Safe to call from a signal handler: nothing here allocates.
-    static func awaitTerminalCatchUp(outputFD: Int32, inputFD: Int32, timeout: TimeInterval) -> CatchUp {
+    static func awaitTerminalCatchUp(
+        outputFD: Int32,
+        inputFD: Int32,
+        quietFor: TimeInterval,
+        limit: TimeInterval
+    ) -> CatchUp {
         let flags = fcntl(inputFD, F_GETFL)
         guard flags >= 0, flags & O_NONBLOCK != 0 else {
             awaitPendingInput(fd: inputFD)
@@ -246,14 +272,15 @@ public enum TerminalSession {
             _ = Darwin.write(outputFD, $0.baseAddress, $0.count)
         }
 
-        let deadline = monotonicNow() + timeout
+        var deadline = monotonicNow() + quietFor
+        let ceiling = monotonicNow() + limit
         // ESC [ ? ... c, scanned a byte at a time. Nothing else that can be
         // queued ahead of the answer - an APC reply, a keypress, an arrow
         // key's ESC [ A - contains "ESC [ ?".
         var stage = 0
         return withUnsafeTemporaryAllocation(of: UInt8.self, capacity: 256) { buffer -> CatchUp in
             while true {
-                let remainingMs = Int32((deadline - monotonicNow()) * 1000)
+                let remainingMs = Int32((min(deadline, ceiling) - monotonicNow()) * 1000)
                 if remainingMs <= 0 { return .unanswered }
 
                 var pfd = pollfd(fd: inputFD, events: Int16(POLLIN), revents: 0)
@@ -270,6 +297,9 @@ public enum TerminalSession {
                     if n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) { continue }
                     return .unanswered
                 }
+                // Something arrived, so the terminal has not gone away and the
+                // answer is still coming. Start the silence over.
+                deadline = monotonicNow() + quietFor
                 for byte in buffer[0..<n] {
                     switch (stage, byte) {
                     case (_, 0x1b): stage = 1
