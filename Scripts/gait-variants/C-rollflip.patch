@@ -1,0 +1,13 @@
+diff --git i/shaders/backrooms.glsl w/shaders/backrooms.glsl
+index cf32f90..f427dd0 100644
+--- i/shaders/backrooms.glsl
++++ w/shaders/backrooms.glsl
+@@ -243,7 +243,7 @@ const vec4 OFF_PACE[7] = vec4[7](
+ // foot.
+ const float BOB = 0.025;           // metres, vertical, once a step
+ const float SWAY = 0.020;          // metres, lateral, once a stride
+-const float GAIT_ROLL = 0.007;     // radians, once a stride
++const float GAIT_ROLL = -0.007;    // radians, once a stride
+ const float GAZE = 6.0;            // metres ahead, where the eyes fix
+ const float GAZE_HOLD = 1.45;      // radians off the walk's heading the eyes will follow
+ const float GAZE_KNEE = 6.0;       // how squarely the follow runs out at GAZE_HOLD

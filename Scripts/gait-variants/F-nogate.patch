@@ -1,0 +1,13 @@
+diff --git i/shaders/backrooms.glsl w/shaders/backrooms.glsl
+index cf32f90..5dde013 100644
+--- i/shaders/backrooms.glsl
++++ w/shaders/backrooms.glsl
+@@ -319,7 +319,7 @@ const float LEAD = 0.25;           // cells the head looks ahead of the body
+ const float NECK = 0.10;           // metres from the neck's axis forward to the eyes
+ const float NECK_MAX = 0.73;       // radians the head turns on the neck, at most
+ const float LEAN = 0.025;          // metres shifted into a turn
+-const float GATE = 0.5;            // depth of the step's modulation of the yaw rate
++const float GATE = 0.0;            // depth of the step's modulation of the yaw rate
+ const float ARCH2 = 0.20;          // second and third harmonics of the bob
+ const float ARCH3 = 0.05;
+ const float IMPACT = 0.004;        // metres the heel strike rings by
