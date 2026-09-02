@@ -864,9 +864,11 @@ vec2 tubeCentre(vec2 cell) {
 // The shares (LIGHT_DIRECT, LIGHT_BOUNCE, LIGHT_AMBIENT) are set so the
 // picture averages what it did with a steeper, unwindowed fall-off, with
 // less of it under each tube and more of it everywhere: a lit office is
-// even, and the walk is meant to feel like it goes on; the blackout, which
-// no tube reaches, stays as dark. Scripts/measure-frame.py is what they
-// were set by.
+// even, and the walk is meant to feel like it goes on. The blackout, which
+// no tube reaches, has LIGHT_AMBIENT and nothing else, and its edge is
+// where the last working tube's reach ends rather than a slow fall-off
+// from tubes two rooms away, so the dark begins sooner and deeper than it
+// did. Scripts/measure-frame.py is what they were set by.
 //
 // The line of sight is tested against the first wall it would cross, one
 // of the four edges of p's own cell, which is exact for the four cells
