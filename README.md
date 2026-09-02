@@ -367,6 +367,17 @@ relative - the same `iTime` and size before and after - and they are what
 holds an edit to "the ceiling is softer and nothing else moved" rather than
 "it looks about the same".
 
+For how a shader moves rather than how it looks, the number is a spectrum.
+`Scripts/gait-spectrum.py` takes a run of frames from `--dump --frames --fps`,
+finds how far each frame moved from the one before (a phase correlation for
+the shift, an ECC fit for the roll) and reports the power at the stride rate,
+the step rate and in the 0.1-0.4 Hz band the walk keeps empty. It fetches
+numpy, OpenCV and matplotlib itself through `uv`. `Scripts/gait-spectrum.sh`
+runs it over two stretches of the backrooms' ordinary walking, first for the
+tree as it is and then for each patch in `Scripts/gait-variants/`, and leaves
+the results in `.build/gait/results.csv` with a spectrum PNG per run. The
+patches are constants only, and the tree comes back as it was found.
+
 ## Tests
 
 ```sh
