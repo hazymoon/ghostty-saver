@@ -37,6 +37,14 @@ const float PILLAR = 0.19;         // half width of a corner pillar
 const float WALL_HALF = 0.06;      // half thickness of a partition wall
 const float WALL_DENSITY = 0.42;   // fraction of edges that carry a wall
 const float LIGHT_DENSITY = 0.72;  // fraction of cells with a working tube
+const float LIGHT_REACH = 6.0;     // metres a tube's light is gone by: 1.5 cells,
+                                   // the nearest a tube two cells out ever is
+const float REACH2 = LIGHT_REACH * LIGHT_REACH;
+const float LIGHT_DIRECT = 2.9;    // a tube's light on a surface facing it
+const float DIRECT_FALL = 0.2;     // and how fast that falls with the square of the distance
+const float LIGHT_BOUNCE = 1.0;    // and off everything else, facing or not
+const float BOUNCE_FALL = 0.3;     // likewise
+const float LIGHT_AMBIENT = 0.025; // what is there with no tube in reach
 const int MAX_CELLS = 24;          // DDA steps before a ray gives up in fog: 96 m,
                                    // where the fog leaves under 0.1 % of the scene
 
@@ -85,7 +93,7 @@ const float STORM_SNOW = 0.12;     // and how much further down the snow's thres
 // its threshold, and colour as AM on a 629 kHz subcarrier, which does not;
 // and it keeps only about 40 colour samples to a line against 333 of
 // luma. So the noise on a tape is coloured before it is grey, and it
-// comes as wide, flat blotches rather than grain; the hue of a line drifts
+// comes as wide, soft blotches rather than grain; the hue of a line drifts
 // with the tape's speed (yellow swings between green and orange); a fine
 // luma pattern such as the wallpaper's stripes is mistaken for colour
 // (cross-colour, the rainbow on a striped shirt); and colour leaks back
@@ -343,6 +351,8 @@ const float BARREL = 0.05;         // lens distortion at the corners
 const vec3 WALL_COLOR = vec3(0.78, 0.66, 0.30);
 const vec3 CARPET_COLOR = vec3(0.42, 0.35, 0.17);
 const vec3 CEILING_COLOR = vec3(0.70, 0.66, 0.50);
+const float GROUT = 0.024;         // metres, the T-bar between ceiling tiles
+const float GROUT_DARK = 0.3;      // how much darker than the tiles it is
 const vec3 TUBE_COLOR = vec3(1.00, 0.98, 0.82);
 const vec3 FOG_COLOR = vec3(0.09, 0.075, 0.03);
 
@@ -410,6 +420,20 @@ float cheap21(vec2 p) {
     v.y += v.x * 1664525u;
     v ^= v >> 16u;
     return float((v.x ^ v.y) & 0x00ffffffu) / 16777216.0;
+}
+
+// Two of them for the price of one: the same mixing, and each half of the
+// state read out on its own, for where a pair of values is wanted at every
+// corner and eight hashes a pixel would be too many.
+vec2 cheap22(vec2 p) {
+    uvec2 v = uvec2(ivec2(p)) * 1664525u + 1013904223u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    return vec2(v & 0x00ffffffu) / 16777216.0;
 }
 
 // The dark corner: cells x in [5, 8) and z in [3, 6) of every tile have no
@@ -837,9 +861,14 @@ vec2 tubeCentre(vec2 cell) {
 // have a clear line to p across the walls, and a share that bounced off
 // everything else, which is what keeps the ceiling from going black when
 // the tubes hang level with it, and what light the walls' shadows have.
-// The bounced share is set so the picture averages about nine tenths as
-// bright as it was before the shadows and the ring of tubes two cells
-// out went; the blackout, which no tube reaches, stays as dark.
+// The shares (LIGHT_DIRECT, LIGHT_BOUNCE, LIGHT_AMBIENT) are set so the
+// picture averages what it did with a steeper, unwindowed fall-off, with
+// less of it under each tube and more of it everywhere: a lit office is
+// even, and the walk is meant to feel like it goes on. The blackout, which
+// no tube reaches, has LIGHT_AMBIENT and nothing else, and its edge is
+// where the last working tube's reach ends rather than a slow fall-off
+// from tubes two rooms away, so the dark begins sooner and deeper than it
+// did. Scripts/measure-frame.py is what they were set by.
 //
 // The line of sight is tested against the first wall it would cross, one
 // of the four edges of p's own cell, which is exact for the four cells
@@ -847,6 +876,15 @@ vec2 tubeCentre(vec2 cell) {
 // Nothing here loops or diverges: a walk over the boundaries, however
 // short, cost a third of the frame, and each tube costs about a
 // twentieth, which is why the ring two cells out is not lit at all.
+//
+// Because it is not, a tube's light has to be gone by the time a point is
+// LIGHT_REACH from it, which is the nearest that ring ever is: a plain
+// inverse square is still a tenth of itself there, and as the sample
+// crosses a cell boundary the set of nine tubes changes, so the wall
+// stepped in brightness every four metres along its length. The window
+// takes each tube's share to zero at LIGHT_REACH and leaves it alone
+// nearer than about two thirds of that, so the set can change without the
+// light doing so and the nearest tube is still worth what it was.
 vec3 lighting(vec3 p, vec3 n, float t) {
     vec2 from = p.xz + n.xz * 0.05;  // off its own wall
     vec2 cell = floor(from / CELL);
@@ -863,7 +901,8 @@ vec3 lighting(vec3 p, vec3 n, float t) {
             vec3 lp = vec3(tubeCentre(c).x, CEILING - 0.05, tubeCentre(c).y);
             vec3 l = lp - p;
             float d2 = dot(l, l);
-            bounced += level * 0.75 / (1.0 + d2 * 0.3);
+            float window = 1.0 - smoothstep(REACH2 * 0.5, REACH2, d2);
+            bounced += level * LIGHT_BOUNCE * window / (1.0 + d2 * BOUNCE_FALL);
             float lambert = max(dot(n, l * inversesqrt(d2)), 0.0);
             if (lambert == 0.0) continue;
             if (dx != 0 || dz != 0) {
@@ -876,7 +915,7 @@ vec3 lighting(vec3 p, vec3 n, float t) {
                 int kind = firstX ? (dx > 0 ? own.y : own.x) : (dz > 0 ? own.w : own.z);
                 if (wallCovers(kind, fract((firstX ? q.y : q.x) / CELL))) continue;
             }
-            direct += level * lambert * 4.5 / (1.0 + d2 * 0.55);
+            direct += level * lambert * LIGHT_DIRECT * window / (1.0 + d2 * DIRECT_FALL);
         }
     }
     return (direct + bounced) * TUBE_COLOR;
@@ -895,8 +934,23 @@ float noise(vec2 p) {
     );
 }
 
-// Albedo and emission of the surface hit at p.
-vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
+// The same, two channels at once.
+vec2 noise2(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+        mix(cheap22(i), cheap22(i + vec2(1.0, 0.0)), f.x),
+        mix(cheap22(i + vec2(0.0, 1.0)), cheap22(i + vec2(1.0, 1.0)), f.x),
+        f.y
+    );
+}
+
+// Albedo and emission of the surface hit at p. `footprint` is the width of
+// the pixel on the surface, in metres: anything drawn narrower than it is
+// drawn as wide as it and as much fainter, so the picture holds its mean
+// where the detail is under a pixel instead of aliasing to a moire.
+vec3 surface(vec3 p, int id, vec3 n, float t, float footprint, out vec3 emission) {
     emission = vec3(0.0);
     if (id == 0) {
         // Carpet: fine speckle, and slow patches where it has been wet.
@@ -906,15 +960,25 @@ vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
     }
     if (id == 1) {
         // Ceiling tiles on a 0.6 m grid, and the tube panel over the middle
-        // of any cell that has one.
+        // of any cell that has one. The grid is the T-bar between the tiles,
+        // GROUT wide and a little darker than them; the line is never drawn
+        // narrower than a pixel, it gets fainter instead, and where a pixel
+        // covers most of a tile it settles to the grid's mean. Without that
+        // the bars stayed a hard line to the vanishing point, the one thing
+        // in the room that did not soften with distance.
         vec2 tile = abs(fract(p.xz / 0.6) - 0.5);
-        float seam = smoothstep(0.44, 0.48, max(tile.x, tile.y));
+        float aa = footprint / 0.6;                    // the pixel, in tiles
+        float hw = GROUT * 0.5 / 0.6;                  // half the bar, in tiles
+        float draw = max(hw, aa);
+        float toBar = 0.5 - max(tile.x, tile.y);       // tiles to the nearest bar
+        float seam = smoothstep(draw + aa, draw - aa, toBar) * (hw / draw);
+        seam = mix(seam, 2.0 * hw, smoothstep(0.25, 0.5, aa));
         vec2 cell = floor(p.xz / CELL);
         vec2 local = p.xz - tubeCentre(cell);
         float panel = step(abs(local.x), 0.6) * step(abs(local.y), 0.3);
         float level = hasTube(cell) ? 1.0 : 0.0;
         float lit = tubeLevel(cell, t);
-        vec3 albedo = CEILING_COLOR * (0.9 + 0.2 * noise(p.xz * 6.0)) * (1.0 - 0.5 * seam);
+        vec3 albedo = CEILING_COLOR * (0.9 + 0.2 * noise(p.xz * 6.0)) * (1.0 - GROUT_DARK * seam);
         // A dead panel is a dark grey box, a live one is where the light is.
         albedo = mix(albedo, vec3(0.25), panel * (1.0 - level));
         emission = TUBE_COLOR * panel * level * (0.6 + 1.4 * lit);
@@ -1209,8 +1273,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // The tubes' stutter is read at the newer field on every line: a 16 Hz
     // flicker a sixtieth of a second off is nothing anyone sees, and it
     // keeps the time out of the per-pixel work.
-    vec3 albedo = surface(p, id, n, tNow, emission);
-    vec3 col = albedo * (lighting(p, n, tNow) + vec3(0.012)) + emission;
+    // The pixel's width where it landed: its angle, times the distance,
+    // stretched by how obliquely it hit.
+    float footprint = dist / (frame.y * FOCAL) / max(abs(dot(n, rd)), 0.05);
+    vec3 albedo = surface(p, id, n, tNow, footprint, emission);
+    vec3 col = albedo * (lighting(p, n, tNow) + vec3(LIGHT_AMBIENT)) + emission;
     float fog = exp(-dist * 0.075);
     col = mix(FOG_COLOR, col, fog);
 
@@ -1248,7 +1315,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float Y = yiq.x;
     vec2 C = yiq.yz;
     vec2 lumaCell = floor(inFrame / frame * vec2(LUMA_SAMPLES, LINES));
-    vec2 chromaCell = floor(inFrame / frame * vec2(CHROMA_SAMPLES, LINES * 0.5));
+    vec2 chromaAt = inFrame / frame * vec2(CHROMA_SAMPLES, LINES * 0.5);
     float bandEdge = band * (1.0 - band) * 4.0;
 
     // Colour was recorded at a fraction of the luma bandwidth, so it lags
@@ -1257,9 +1324,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // The hue of each line drifts with the tape, and tears at the band.
     float phase = PHASE_ERROR * (cheap21(vec2(line, fseed.x)) - 0.5) * 2.0 + bandEdge * 1.2;
     C = mat2(cos(phase), sin(phase), -sin(phase), cos(phase)) * C;
-    // Colour noise: wide flat blotches, two lines tall; lost inside the
-    // band and worst at its edges.
-    vec2 blotch = vec2(cheap21(chromaCell + fseed), cheap21(chromaCell + fseed.yx + 7.0)) * 2.0 - 1.0;
+    // Colour noise: wide blotches, two lines tall, and with no edge of
+    // their own - the colour bandwidth that makes them wide is the same one
+    // that stops them being sharp, so they are sampled on the colour grid
+    // and interpolated between, not held flat across each cell; lost inside
+    // the band and worst at its edges.
+    vec2 blotch = noise2(chromaAt + fseed) * 2.0 - 1.0;
     C *= 1.0 - band * 0.85;
     C += blotch * (CHROMA_NOISE * (1.0 + storm * STORM_GRAIN) + bandEdge * 0.35);
     // Cross-colour: a horizontal luma slope near the subcarrier's frequency
