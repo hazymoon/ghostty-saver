@@ -422,6 +422,20 @@ float cheap21(vec2 p) {
     return float((v.x ^ v.y) & 0x00ffffffu) / 16777216.0;
 }
 
+// Two of them for the price of one: the same mixing, and each half of the
+// state read out on its own, for where a pair of values is wanted at every
+// corner and eight hashes a pixel would be too many.
+vec2 cheap22(vec2 p) {
+    uvec2 v = uvec2(ivec2(p)) * 1664525u + 1013904223u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    return vec2(v & 0x00ffffffu) / 16777216.0;
+}
+
 // The dark corner: cells x in [5, 8) and z in [3, 6) of every tile have no
 // working light. The walk runs up its west edge, x = 4, and the first pause
 // is there, looking in.
@@ -918,6 +932,18 @@ float noise(vec2 p) {
     );
 }
 
+// The same, two channels at once.
+vec2 noise2(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+        mix(cheap22(i), cheap22(i + vec2(1.0, 0.0)), f.x),
+        mix(cheap22(i + vec2(0.0, 1.0)), cheap22(i + vec2(1.0, 1.0)), f.x),
+        f.y
+    );
+}
+
 // Albedo and emission of the surface hit at p. `footprint` is the width of
 // the pixel on the surface, in metres: anything drawn narrower than it is
 // drawn as wide as it and as much fainter, so the picture holds its mean
@@ -1301,7 +1327,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // that stops them being sharp, so they are sampled on the colour grid
     // and interpolated between, not held flat across each cell; lost inside
     // the band and worst at its edges.
-    vec2 blotch = vec2(noise(chromaAt + fseed), noise(chromaAt + fseed.yx + 7.0)) * 2.0 - 1.0;
+    vec2 blotch = noise2(chromaAt + fseed) * 2.0 - 1.0;
     C *= 1.0 - band * 0.85;
     C += blotch * (CHROMA_NOISE * (1.0 + storm * STORM_GRAIN) + bandEdge * 0.35);
     // Cross-colour: a horizontal luma slope near the subcarrier's frequency
