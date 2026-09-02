@@ -85,7 +85,7 @@ const float STORM_SNOW = 0.12;     // and how much further down the snow's thres
 // its threshold, and colour as AM on a 629 kHz subcarrier, which does not;
 // and it keeps only about 40 colour samples to a line against 333 of
 // luma. So the noise on a tape is coloured before it is grey, and it
-// comes as wide, flat blotches rather than grain; the hue of a line drifts
+// comes as wide, soft blotches rather than grain; the hue of a line drifts
 // with the tape's speed (yellow swings between green and orange); a fine
 // luma pattern such as the wallpaper's stripes is mistaken for colour
 // (cross-colour, the rainbow on a striped shirt); and colour leaks back
@@ -1248,7 +1248,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float Y = yiq.x;
     vec2 C = yiq.yz;
     vec2 lumaCell = floor(inFrame / frame * vec2(LUMA_SAMPLES, LINES));
-    vec2 chromaCell = floor(inFrame / frame * vec2(CHROMA_SAMPLES, LINES * 0.5));
+    vec2 chromaAt = inFrame / frame * vec2(CHROMA_SAMPLES, LINES * 0.5);
     float bandEdge = band * (1.0 - band) * 4.0;
 
     // Colour was recorded at a fraction of the luma bandwidth, so it lags
@@ -1257,9 +1257,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // The hue of each line drifts with the tape, and tears at the band.
     float phase = PHASE_ERROR * (cheap21(vec2(line, fseed.x)) - 0.5) * 2.0 + bandEdge * 1.2;
     C = mat2(cos(phase), sin(phase), -sin(phase), cos(phase)) * C;
-    // Colour noise: wide flat blotches, two lines tall; lost inside the
-    // band and worst at its edges.
-    vec2 blotch = vec2(cheap21(chromaCell + fseed), cheap21(chromaCell + fseed.yx + 7.0)) * 2.0 - 1.0;
+    // Colour noise: wide blotches, two lines tall, and with no edge of
+    // their own - the colour bandwidth that makes them wide is the same one
+    // that stops them being sharp, so they are sampled on the colour grid
+    // and interpolated between, not held flat across each cell; lost inside
+    // the band and worst at its edges.
+    vec2 blotch = vec2(noise(chromaAt + fseed), noise(chromaAt + fseed.yx + 7.0)) * 2.0 - 1.0;
     C *= 1.0 - band * 0.85;
     C += blotch * (CHROMA_NOISE * (1.0 + storm * STORM_GRAIN) + bandEdge * 0.35);
     // Cross-colour: a horizontal luma slope near the subcarrier's frequency
