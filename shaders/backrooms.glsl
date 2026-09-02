@@ -37,6 +37,14 @@ const float PILLAR = 0.19;         // half width of a corner pillar
 const float WALL_HALF = 0.06;      // half thickness of a partition wall
 const float WALL_DENSITY = 0.42;   // fraction of edges that carry a wall
 const float LIGHT_DENSITY = 0.72;  // fraction of cells with a working tube
+const float LIGHT_REACH = 6.0;     // metres a tube's light is gone by: 1.5 cells,
+                                   // the nearest a tube two cells out ever is
+const float REACH2 = LIGHT_REACH * LIGHT_REACH;
+const float LIGHT_DIRECT = 2.9;    // a tube's light on a surface facing it
+const float DIRECT_FALL = 0.2;     // and how fast that falls with the square of the distance
+const float LIGHT_BOUNCE = 1.0;    // and off everything else, facing or not
+const float BOUNCE_FALL = 0.3;     // likewise
+const float LIGHT_AMBIENT = 0.025; // what is there with no tube in reach
 const int MAX_CELLS = 24;          // DDA steps before a ray gives up in fog: 96 m,
                                    // where the fog leaves under 0.1 % of the scene
 
@@ -839,9 +847,12 @@ vec2 tubeCentre(vec2 cell) {
 // have a clear line to p across the walls, and a share that bounced off
 // everything else, which is what keeps the ceiling from going black when
 // the tubes hang level with it, and what light the walls' shadows have.
-// The bounced share is set so the picture averages about nine tenths as
-// bright as it was before the shadows and the ring of tubes two cells
-// out went; the blackout, which no tube reaches, stays as dark.
+// The shares (LIGHT_DIRECT, LIGHT_BOUNCE, LIGHT_AMBIENT) are set so the
+// picture averages what it did with a steeper, unwindowed fall-off, with
+// less of it under each tube and more of it everywhere: a lit office is
+// even, and the walk is meant to feel like it goes on; the blackout, which
+// no tube reaches, stays as dark. Scripts/measure-frame.py is what they
+// were set by.
 //
 // The line of sight is tested against the first wall it would cross, one
 // of the four edges of p's own cell, which is exact for the four cells
@@ -849,6 +860,15 @@ vec2 tubeCentre(vec2 cell) {
 // Nothing here loops or diverges: a walk over the boundaries, however
 // short, cost a third of the frame, and each tube costs about a
 // twentieth, which is why the ring two cells out is not lit at all.
+//
+// Because it is not, a tube's light has to be gone by the time a point is
+// LIGHT_REACH from it, which is the nearest that ring ever is: a plain
+// inverse square is still a tenth of itself there, and as the sample
+// crosses a cell boundary the set of nine tubes changes, so the wall
+// stepped in brightness every four metres along its length. The window
+// takes each tube's share to zero at LIGHT_REACH and leaves it alone
+// nearer than about two thirds of that, so the set can change without the
+// light doing so and the nearest tube is still worth what it was.
 vec3 lighting(vec3 p, vec3 n, float t) {
     vec2 from = p.xz + n.xz * 0.05;  // off its own wall
     vec2 cell = floor(from / CELL);
@@ -865,7 +885,8 @@ vec3 lighting(vec3 p, vec3 n, float t) {
             vec3 lp = vec3(tubeCentre(c).x, CEILING - 0.05, tubeCentre(c).y);
             vec3 l = lp - p;
             float d2 = dot(l, l);
-            bounced += level * 0.75 / (1.0 + d2 * 0.3);
+            float window = 1.0 - smoothstep(REACH2 * 0.5, REACH2, d2);
+            bounced += level * LIGHT_BOUNCE * window / (1.0 + d2 * BOUNCE_FALL);
             float lambert = max(dot(n, l * inversesqrt(d2)), 0.0);
             if (lambert == 0.0) continue;
             if (dx != 0 || dz != 0) {
@@ -878,7 +899,7 @@ vec3 lighting(vec3 p, vec3 n, float t) {
                 int kind = firstX ? (dx > 0 ? own.y : own.x) : (dz > 0 ? own.w : own.z);
                 if (wallCovers(kind, fract((firstX ? q.y : q.x) / CELL))) continue;
             }
-            direct += level * lambert * 4.5 / (1.0 + d2 * 0.55);
+            direct += level * lambert * LIGHT_DIRECT * window / (1.0 + d2 * DIRECT_FALL);
         }
     }
     return (direct + bounced) * TUBE_COLOR;
@@ -1228,7 +1249,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // stretched by how obliquely it hit.
     float footprint = dist / (frame.y * FOCAL) / max(abs(dot(n, rd)), 0.05);
     vec3 albedo = surface(p, id, n, tNow, footprint, emission);
-    vec3 col = albedo * (lighting(p, n, tNow) + vec3(0.012)) + emission;
+    vec3 col = albedo * (lighting(p, n, tNow) + vec3(LIGHT_AMBIENT)) + emission;
     float fog = exp(-dist * 0.075);
     col = mix(FOG_COLOR, col, fog);
 
