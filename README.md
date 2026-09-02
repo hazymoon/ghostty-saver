@@ -276,6 +276,28 @@ To see where the time goes, run it in a Ghostty window with `--stats`. Read
 `frames` before the timings: a keypress ends the run, and a short one averages
 the shader's first compile into its numbers.
 
+That measurement, and `Scripts/measure-frame-times.sh` around it, wants a
+visible frontmost window and the machine left alone, which is not something to
+do after every edit. For the question that comes up after every edit - did
+this change make the shader slower - there is a timing in the test suite,
+off unless it is asked for:
+
+```sh
+GHOSTTY_SAVER_TIME=backrooms swift test 2>&1 | grep -A3 'frame cost'
+```
+
+It renders the shader at 3832 x 2152 through the same `MetalRenderer.render`,
+spread over 150 seconds of `iTime` so a shader that is dark or still for part
+of its cycle is not judged on one moment, and prints mean, p50, p95 and min.
+`GHOSTTY_SAVER_TIME=all` does the catalogue, `GHOSTTY_SAVER_TIME_SIZE` and
+`GHOSTTY_SAVER_TIME_SPAN` move the resolution and the span. Read the p95.
+
+These numbers are the shader with nothing compositing beside it, so they are
+lower than the window's and are not a substitute for them. The numbers to
+design against live in `docs/frame-times.md`. What they are good for is a
+branch against `main` on the same machine in the same minute, which is enough
+to catch a change that has quietly put a millisecond back.
+
 To look at a shader without a terminal:
 
 ```sh

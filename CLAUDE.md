@@ -15,6 +15,11 @@ Commit messages, comments and docs are in English.
 - Terminal-path tests use a pty (`posix_openpt`) and run under `swift test`
   without a tty; `TerminalSession.devicePath(of:)` is the one that opens
   `/dev/tty` and skips itself when there is none.
+- `GHOSTTY_SAVER_TIME=<name> swift test` times a shader at 4K offline (mean,
+  p50, p95, min) without a window, which is the only frame-cost check that
+  can be run while the machine is in use. Compare a branch against `main` in
+  the same session; the absolute figure moves with whatever else is running,
+  and only `Scripts/measure-frame-times.sh` gives a number to design against.
 
 ## Checking against a real Ghostty window
 
