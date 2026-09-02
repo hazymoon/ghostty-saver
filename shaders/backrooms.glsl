@@ -343,6 +343,8 @@ const float BARREL = 0.05;         // lens distortion at the corners
 const vec3 WALL_COLOR = vec3(0.78, 0.66, 0.30);
 const vec3 CARPET_COLOR = vec3(0.42, 0.35, 0.17);
 const vec3 CEILING_COLOR = vec3(0.70, 0.66, 0.50);
+const float GROUT = 0.024;         // metres, the T-bar between ceiling tiles
+const float GROUT_DARK = 0.3;      // how much darker than the tiles it is
 const vec3 TUBE_COLOR = vec3(1.00, 0.98, 0.82);
 const vec3 FOG_COLOR = vec3(0.09, 0.075, 0.03);
 
@@ -895,8 +897,11 @@ float noise(vec2 p) {
     );
 }
 
-// Albedo and emission of the surface hit at p.
-vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
+// Albedo and emission of the surface hit at p. `footprint` is the width of
+// the pixel on the surface, in metres: anything drawn narrower than it is
+// drawn as wide as it and as much fainter, so the picture holds its mean
+// where the detail is under a pixel instead of aliasing to a moire.
+vec3 surface(vec3 p, int id, vec3 n, float t, float footprint, out vec3 emission) {
     emission = vec3(0.0);
     if (id == 0) {
         // Carpet: fine speckle, and slow patches where it has been wet.
@@ -906,15 +911,25 @@ vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
     }
     if (id == 1) {
         // Ceiling tiles on a 0.6 m grid, and the tube panel over the middle
-        // of any cell that has one.
+        // of any cell that has one. The grid is the T-bar between the tiles,
+        // GROUT wide and a little darker than them; the line is never drawn
+        // narrower than a pixel, it gets fainter instead, and where a pixel
+        // covers most of a tile it settles to the grid's mean. Without that
+        // the bars stayed a hard line to the vanishing point, the one thing
+        // in the room that did not soften with distance.
         vec2 tile = abs(fract(p.xz / 0.6) - 0.5);
-        float seam = smoothstep(0.44, 0.48, max(tile.x, tile.y));
+        float aa = footprint / 0.6;                    // the pixel, in tiles
+        float hw = GROUT * 0.5 / 0.6;                  // half the bar, in tiles
+        float draw = max(hw, aa);
+        float toBar = 0.5 - max(tile.x, tile.y);       // tiles to the nearest bar
+        float seam = smoothstep(draw + aa, draw - aa, toBar) * (hw / draw);
+        seam = mix(seam, 2.0 * hw, smoothstep(0.25, 0.5, aa));
         vec2 cell = floor(p.xz / CELL);
         vec2 local = p.xz - tubeCentre(cell);
         float panel = step(abs(local.x), 0.6) * step(abs(local.y), 0.3);
         float level = hasTube(cell) ? 1.0 : 0.0;
         float lit = tubeLevel(cell, t);
-        vec3 albedo = CEILING_COLOR * (0.9 + 0.2 * noise(p.xz * 6.0)) * (1.0 - 0.5 * seam);
+        vec3 albedo = CEILING_COLOR * (0.9 + 0.2 * noise(p.xz * 6.0)) * (1.0 - GROUT_DARK * seam);
         // A dead panel is a dark grey box, a live one is where the light is.
         albedo = mix(albedo, vec3(0.25), panel * (1.0 - level));
         emission = TUBE_COLOR * panel * level * (0.6 + 1.4 * lit);
@@ -1209,7 +1224,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // The tubes' stutter is read at the newer field on every line: a 16 Hz
     // flicker a sixtieth of a second off is nothing anyone sees, and it
     // keeps the time out of the per-pixel work.
-    vec3 albedo = surface(p, id, n, tNow, emission);
+    // The pixel's width where it landed: its angle, times the distance,
+    // stretched by how obliquely it hit.
+    float footprint = dist / (frame.y * FOCAL) / max(abs(dot(n, rd)), 0.05);
+    vec3 albedo = surface(p, id, n, tNow, footprint, emission);
     vec3 col = albedo * (lighting(p, n, tNow) + vec3(0.012)) + emission;
     float fog = exp(-dist * 0.075);
     col = mix(FOG_COLOR, col, fog);
