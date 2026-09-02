@@ -78,7 +78,7 @@ const float STORM_TRAIL = 10.0;    // and takes to die after
 const float STORM_DROP = 0.35;     // added to DROP_CHANCE at its peak
 const float STORM_BAND = 0.50;     // to BAND_CHANCE
 const float STORM_WOBBLE = 0.50;   // and to WOBBLE_CHANCE
-const float STORM_GRAIN = 1.30;    // how much more noise there is in Y and in colour
+const float STORM_GRAIN = 1.00;    // how much more noise there is in Y and in colour
 const float STORM_SNOW = 0.12;     // and how much further down the snow's threshold goes
 
 // The tape's colour. VHS records luma as FM, which suppresses noise above
