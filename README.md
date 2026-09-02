@@ -344,6 +344,17 @@ at its jump by design - and `--gate` turns it into an exit status for a shader
 that has to pass. `Scripts/analyze-contrast.py --self-test` checks the
 arithmetic against WCAG's known pairs.
 
+For how a shader moves rather than how it looks, the number is a spectrum.
+`Scripts/gait-spectrum.py` takes a run of frames from `--dump --frames --fps`,
+finds how far each frame moved from the one before (a phase correlation for
+the shift, an ECC fit for the roll) and reports the power at the stride rate,
+the step rate and in the 0.1-0.4 Hz band the walk keeps empty. It fetches
+numpy, OpenCV and matplotlib itself through `uv`. `Scripts/gait-spectrum.sh`
+runs it over two stretches of the backrooms' ordinary walking, first for the
+tree as it is and then for each patch in `Scripts/gait-variants/`, and leaves
+the results in `.build/gait/results.csv` with a spectrum PNG per run. The
+patches are constants only, and the tree comes back as it was found.
+
 ## Tests
 
 ```sh

@@ -1,0 +1,13 @@
+diff --git i/shaders/backrooms.glsl w/shaders/backrooms.glsl
+index cf32f90..92e7972 100644
+--- i/shaders/backrooms.glsl
++++ w/shaders/backrooms.glsl
+@@ -137,7 +137,7 @@ const float EASE = 2.0;            // seconds to slow into and out of a pause
+ const float PAUSE1 = 30.0;         // lap seconds at which each pause begins:
+ const float PAUSE2 = 106.0;        // on the blackout's edge, and on the way back
+ const int STEPS = 30;              // cells walked per lap
+-const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
++const float PACE = 8.0;            // footsteps per cell: 0.50 m steps, 1.8 Hz
+ 
+ // Everywhere the walk is off its pace, as a start, a length, an ease and a
+ // depth: 1 stops it, less than 1 slows it, and below zero it is the walk
