@@ -1347,7 +1347,13 @@ Pose cameraPose(float t) {
     // And looking at something while walking past it, which is an angle
     // that has to be worked out rather than set: see GAZE_AT.
     float gazeOff, gazeRate;
-    gazeOffset(u, (body + 0.5) * CELL, going * CELL * sRate, heading + neck,
+    // In the tile GAZE_AT's plan is drawn on, not in the world: the walk
+    // ends a tile north of where it started, so on every lap after the first
+    // the eye is one or more tiles away from a point written in that plan.
+    // Only the difference matters, so the eye is brought back rather than
+    // the point taken forward.
+    vec2 tileEye = (body - vec2(0.0, floor(t / LAP) * SUPER) + 0.5) * CELL;
+    gazeOffset(u, tileEye, going * CELL * sRate, heading + neck,
                headingRate + neckRate, gazeOff, gazeRate);
     look += gazeOff;
     lookRate += gazeRate;
