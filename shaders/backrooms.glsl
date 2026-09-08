@@ -173,19 +173,31 @@ const float PACE = 6.8;            // footsteps per cell: 0.59 m steps, 1.5 Hz
 // however much of it is spent going slowly, and the hurrying is paid for
 // by the ordinary pace being a little under a metre a second rather than
 // a little over.
-// The third stop is not planned at all. It is three seconds, it stops the
-// walk in six tenths rather than two seconds, and nothing in the picture
-// says why: the walker has heard something, and the tape does not record
-// what. It is on the way back, in the middle of a straight, well clear of
-// the pauses - the depths add - and it is not tied to any of the tape's
-// faults or the tubes' fits, which are hashed on absolute time and would
-// line up with it on one lap in a hundred and never again.
+// The third stop is not planned either, and it is the one the walker did
+// not decide on. It still stops the walk in six tenths rather than two
+// seconds, and there is something in the picture that says why now: the
+// lights go out OUTAGE_LEAD before it, and it lasts nine seconds because
+// that is how long somebody stands and looks at what the dark leaves lit.
+// It is still on the way back, in the middle of a straight, well clear of
+// the pauses - the depths add - and it is still nothing to do with the
+// tape's faults or the tubes' fits, which are hashed on absolute time and
+// would line up with it on one lap in a hundred and never again. What it
+// is tied to is on lap time with it; see OUTAGE_LEAD and FIGURE_CELL.
+//
+// Its lap second moved when its length did. A stop's seconds come out of
+// the walking the lap has left - walkSpeed divides by what is left - so six
+// more of them put the pace up from 0.93 to 0.98 m/s and everything ahead
+// of the stop about a cell further along the walk: the first pause is still
+// on the blackout's edge, the gaze still through its doorways, the glance
+// still clear of both corners of the leg it is taken on. What the stop
+// could not stay at is its old second, because the hurrying that follows it
+// has to finish inside the lap or the seam between laps is a jump.
 const float CREEP = 0.45;          // how much of the pace the creep takes off
 const float CREEP_IN = 6.77;       // seconds of it before the pause: from where
                                    // the blackout's first doorway comes into view
 const float CREEP_OUT = 18.89;     // and after it: past the last of the doorways
-const float FREEZE_AT = 132.25;    // lap second the walk stops dead
-const float FREEZE = 3.0;          // for this long
+const float FREEZE_AT = 126.0;     // lap second the walk stops dead
+const float FREEZE = 9.0;          // for this long
 const float FREEZE_EASE = 0.6;     // and this is all the warning it gives
 const float HURRY = -0.30;         // how much faster the walk is afterwards
 const float HURRY_ON = 2.5;        // seconds it takes to pick up, after the blackout
@@ -233,10 +245,55 @@ const float OUTAGE_OVER = OUTAGE_BACK + TUBE_WARM + TUBE_STRIKE + 0.7;
 // is deaf for a moment first, so the gain is one move up and one move back
 // down and nothing in between - a gain that hunts is a strobe, and the note
 // at the tape's colour says why there is none of that here.
-const float AGC_GAIN = 2.2;        // times the video, at the top of the gain
+const float AGC_GAIN = 2.0;        // times the video, at the top of the gain
 const float AGC_LAG = 0.4;         // seconds the loop takes to notice the dark
 const float AGC_ON = 0.9;          // and to wind the gain up
 const float AGC_OFF = 0.6;         // it comes back down quicker than it went up
+// The share of the gain that reaches the noise. Not all of it: what is
+// modelled below is mostly the tape's own floor, which is laid down after
+// the camera and does not care what the camera did with its gain, and only
+// the part that was the sensor's comes up with the picture. Given all of
+// it, the frame goes to coloured confetti - the chroma noise passes the
+// walls' own saturation and the room stops being a room.
+const float AGC_GRAIN = 0.35;
+
+// And the one thing the dark leaves. One cell of every tile keeps its mains
+// through the outage, four and a half cells down the straight the walk
+// stops on, with a wall two metres behind it and every edge between it and
+// the camera open; and for as long as the dark lasts there is somebody
+// standing in it, a little off the room's centre line, not moving.
+//
+// Nothing about it moves, and nothing about it is seen to arrive or to go.
+// It comes up out of the noise as the gain winds on, and it goes as the
+// first tubes strike, under the one change in the picture that anybody is
+// going to be looking at. What is on the tape is that it was there and then
+// it was not, which is the whole of it.
+//
+// At eighteen metres and this lens it is an eighth of the frame high and
+// about seven luma samples across, which is a dark vertical mark standing
+// in a lit doorway: a person. That it is not a person is a matter of
+// proportion, and proportion is not legible until the camera has zoomed.
+const vec2 FIGURE_CELL = vec2(3.0, 6.0);   // cells, in the tile the walk repeats in
+const float FIGURE_OFF = 1.1;      // metres it stands off the room's centre line
+const float FIGURE_TALL = 1.75;    // metres, which is how tall people are
+const float FIGURE_IN = 0.4;       // seconds it takes to come out of the noise
+const float FIGURE_GONE = 0.15;    // and to be gone, under the first tube
+const vec3 FIGURE_COLOR = vec3(0.02);  // near enough a hole in the picture
+
+// What is wrong with it. A figure wrong in six ways at once is a monster,
+// and a monster is a thing the eye finishes reading and puts down; one that
+// is wrong in a single way is a person the eye keeps going back to and
+// cannot settle. So a hash of the lap number picks one of the six, and on
+// about half the laps a second one, and everything else about it is exactly
+// a person. Over an evening a watcher sees several of them and never the
+// same one twice running, which is also why none of the six is the one the
+// figure is known by.
+const float WRONG_TALL = 0.35;     // times taller: 2.4 m, the head near the ceiling
+const float WRONG_ARM = 0.45;      // metres one hand hangs below where hands stop
+const float WRONG_NECK = 0.16;     // metres of neck there is no room for
+const float WRONG_TILT = 0.10;     // metres one shoulder stands above the other
+const float WRONG_ELBOW = 0.19;    // metres the elbow is the wrong side of the arm
+const float WRONG_HOVER = 0.12;    // metres of air under both feet
 
 // The camera is held by a person, and a person's head is steadier than the
 // hand-held shake that shaders reach for. Everything below is chosen so
@@ -433,13 +490,21 @@ const int OPEN_SIDES[64] = int[64](
 // still in the frame while the walls slide past it, which is what watching
 // something looks like and what turning the head does not.
 //
-// x, z, the lap second it opens, and how long it is open. The one gaze is
-// a room of the blackout, seen through the doorways on the walk up its
-// edge: the walker has already stopped and looked into the dark at PAUSE1,
-// and starts walking again still watching it, over the shoulder, until the
+// x, z, the lap second it opens, and how long it is open. The first is a
+// room of the blackout, seen through the doorways on the walk up its edge:
+// the walker has already stopped and looked into the dark at PAUSE1, and
+// starts walking again still watching it, over the shoulder, until the
 // neck gives out and the head comes back to where the feet are going.
-const vec4 GAZE_AT[1] = vec4[1](
-    vec4(6.0, 5.0, 40.0, 6.5)
+//
+// The second is the one cell that keeps its light when the mains go, held
+// from the moment the rest of them do. That room is straight down the
+// walk's heading, so the angle it asks for is next to nothing: what it is
+// for is that the eyes stay on it over the second and a half the body
+// spends finishing its corner and stopping, instead of turning with the
+// feet. Eyes go to the light before the walk knows it has stopped.
+const vec4 GAZE_AT[2] = vec4[2](
+    vec4(6.0, 5.0, 40.0, 6.5),
+    vec4(FIGURE_CELL.x, FIGURE_CELL.y, OUTAGE_AT, OUTAGE_LEN + 0.5)
 );
 
 // A hash without a sin(), on whole numbers (pcg2d). The walls and the
@@ -914,7 +979,13 @@ float tubeLevel(vec2 cell, float t) {
     if (inBlackout(cell)) return 0.0;
     float h = tubeHash(cell);
     if (h > LIGHT_DENSITY) return 0.0;
-    float power = tubeMains(mod(t, LAP), h);
+    // One cell in the tile keeps its mains. Nothing about the building says
+    // why - it is the cell with something standing in it, and a thing that
+    // is only there while the lights are out has to be somewhere they are
+    // not. Written as a max rather than a branch: tubeMains is a compare
+    // outside the outage, and this runs for nine cells a pixel.
+    float kept = float(all(equal(mod(cell, SUPER), FIGURE_CELL)));
+    float power = max(kept, tubeMains(mod(t, LAP), h));
     if (power == 0.0) return 0.0;
     float bad = h / LIGHT_DENSITY;
     if (bad > 0.22) return power;
@@ -1076,6 +1147,80 @@ vec3 surface(vec3 p, int id, vec3 n, float t, float footprint, out vec3 emission
     float skirting = 1.0 - 0.35 * smoothstep(0.12, 0.09, p.y);
     float top = 1.0 - 0.15 * smoothstep(CEILING - 0.3, CEILING, p.y);
     return WALL_COLOR * (0.92 + 0.08 * stripe) * (0.8 + 0.35 * grime) * skirting * top;
+}
+
+// --- the figure -----------------------------------------------------------
+
+// Which of the six things is wrong with the figure this lap. cheap21 and
+// not hash11: this is worked out from the lap number, which is the same for
+// every pixel of the frame, but it is worked out per pixel all the same,
+// and the note at cheap21 has what a sin() hash costs when it is.
+struct Wrong {
+    float tall;    // too tall for the room
+    float arm;     // one arm hanging past the knee
+    float neck;    // more neck than there is room for
+    float tilt;    // shoulders that are not level
+    float elbow;   // an elbow on the wrong side of its arm
+    float hover;   // both feet off the floor
+};
+
+// 1 if deviation `i` is one of the one or two this lap draws.
+float picked(float i, float a, float b, float two) {
+    return max(step(abs(i - a), 0.25), two * step(abs(i - b), 0.25));
+}
+
+Wrong wrongOf(float lap) {
+    float a = floor(cheap21(vec2(lap, 3.0)) * 6.0);
+    float b = floor(cheap21(vec2(lap, 17.0)) * 6.0);
+    float two = step(0.5, cheap21(vec2(lap, 29.0)));
+    return Wrong(picked(0.0, a, b, two), picked(1.0, a, b, two), picked(2.0, a, b, two),
+                 picked(3.0, a, b, two), picked(4.0, a, b, two), picked(5.0, a, b, two));
+}
+
+// Distance from p to the segment ab, in the plane.
+float segment(vec2 p, vec2 a, vec2 b) {
+    vec2 pa = p - a;
+    vec2 ba = b - a;
+    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+}
+
+// The figure's outline as a distance in metres on its billboard, where p is
+// (across, up) in metres from the piece of floor it stands on. Nine strokes
+// - two legs, a torso, a neck, a head, and two arms with an elbow each - as
+// capsules, which is all a person is at eighteen metres through a tape.
+// Written in the proportions of a FIGURE_TALL body and scaled at the end,
+// so the height deviation is one divide and does not move anything else.
+float figureDist(vec2 p, Wrong w) {
+    p.y -= WRONG_HOVER * w.hover;
+    float scale = 1.0 + WRONG_TALL * w.tall;
+    p /= scale;
+    float lift = WRONG_TILT * w.tilt;
+    vec2 shoulderL = vec2(-0.19, 1.42 + lift);
+    vec2 shoulderR = vec2(0.19, 1.42);
+    float d = segment(p, vec2(-0.10, 0.92), vec2(-0.11, 0.0)) - 0.075;
+    d = min(d, segment(p, vec2(0.10, 0.92), vec2(0.11, 0.0)) - 0.075);
+    d = min(d, segment(p, vec2(0.0, 0.94), vec2(0.0, 1.40)) - 0.15);
+    float neckTop = 1.50 + WRONG_NECK * w.neck;
+    d = min(d, segment(p, vec2(0.0, 1.40), vec2(0.0, neckTop)) - 0.05);
+    d = min(d, length(p - vec2(0.0, neckTop + 0.105)) - 0.105);
+    // The right arm is the one that hangs; the left is the one whose elbow
+    // is wrong, so that a lap which draws both still draws two arms.
+    vec2 elbowR = vec2(0.235, 1.10 - 0.20 * w.arm);
+    vec2 handR = vec2(0.215, 0.80 - WRONG_ARM * w.arm);
+    vec2 elbowL = vec2(-0.235 + WRONG_ELBOW * w.elbow, 1.10);
+    d = min(d, segment(p, shoulderR, elbowR) - 0.05);
+    d = min(d, segment(p, elbowR, handR) - 0.05);
+    d = min(d, segment(p, shoulderL, elbowL) - 0.05);
+    d = min(d, segment(p, elbowL, vec2(-0.215, 0.80)) - 0.05);
+    return d * scale;
+}
+
+// Whether the figure is on the tape at lap-time u, from 0 to 1: see
+// FIGURE_IN. It is up before the gain is, so it arrives by being developed
+// rather than by appearing, and it is gone inside a sixth of a second as
+// the first tubes strike.
+float figureShows(float u) {
+    return bump(u, OUTAGE_AT, OUTAGE_AT + FIGURE_IN, OUTAGE_BACK, OUTAGE_BACK + FIGURE_GONE);
 }
 
 // --- the tape -------------------------------------------------------------
@@ -1324,6 +1469,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // rather than the scene's: the gain is the camera's, so a dropped frame
     // holds it along with everything else. See AGC_GAIN.
     float gain = 1.0 + AGC_GAIN * agcAt(lapNow);
+    float grainGain = 1.0 + (gain - 1.0) * AGC_GRAIN;  // see AGC_GRAIN
 
     // Tape faults that displace whole scan lines are applied here, to the
     // ray, so the picture really shifts rather than a copy of it.
@@ -1369,6 +1515,46 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 col = albedo * (lighting(p, n, tNow) + vec3(LIGHT_AMBIENT)) + emission;
     float fog = exp(-dist * 0.075);
     col = mix(FOG_COLOR, col, fog);
+
+    // --- the one thing in the light ---------------------------------------
+    // One plane, one ray, after the trace and not inside it: what the trace
+    // costs is the cells its DDA walks, and a thing that is not the maze has
+    // no business in that loop. The window is a branch on lap time, the same
+    // value for every pixel of the frame, so on the rest of the lap this is
+    // a compare; inside it, the plane is a dozen operations and nothing past
+    // the bounding box is paid for by a pixel the figure is not on.
+    //
+    // The plane faces the camera and stands on the floor of FIGURE_CELL, one
+    // tile north for each lap the walk has done, so it is where the walk is.
+    float shows = figureShows(lapNow);
+    if (shows > 0.0) {
+        Wrong wrong = wrongOf(floor(tNow / LAP));
+        vec3 foot = vec3((FIGURE_CELL.x + 0.5) * CELL, 0.0,
+                         (FIGURE_CELL.y + 0.5) * CELL + floor(tNow / LAP) * SUPER * CELL
+                             + FIGURE_OFF);
+        vec3 face = normalize(vec3(ro.x - foot.x, 0.0, ro.z - foot.z));
+        vec3 across = vec3(-face.z, 0.0, face.x);
+        float tHit = dot(foot - ro, face) / min(dot(rd, face), -1e-4);
+        vec3 hit = ro + rd * tHit;
+        vec2 local = vec2(dot(hit - foot, across), hit.y);
+        float scale = 1.0 + WRONG_TALL * wrong.tall;
+        if (tHit > 0.0 && tHit < dist && abs(local.x) < 0.4 * scale
+                && local.y > -0.1 && local.y < FIGURE_TALL * scale + WRONG_HOVER + 0.1) {
+            // A pixel's worth of world at that distance, so the outline is
+            // not a staircase. Taken from the geometry and not from fwidth:
+            // a derivative inside a branch that only some of the quad takes
+            // is a derivative of nothing.
+            float aa = tHit / (FOCAL * frame.y);
+            float cover = shows * smoothstep(aa, -aa, figureDist(local, wrong));
+            if (cover > 0.0) {
+                // Lit like anything else standing there, which at this
+                // albedo means barely: what is on the tape is the lit wall
+                // two metres behind it with a hole in the middle of it.
+                vec3 lit = FIGURE_COLOR * (lighting(hit, face, tNow) + vec3(0.012));
+                col = mix(col, mix(FOG_COLOR, lit, exp(-tHit * 0.075)), cover);
+            }
+        }
+    }
 
     // --- the camera's optics and electronics ------------------------------
     // Everything from here on runs for every pixel: the faults below are
@@ -1427,7 +1613,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // the band and worst at its edges.
     vec2 blotch = noise2(chromaAt + fseed) * 2.0 - 1.0;
     C *= 1.0 - band * 0.85;
-    C += blotch * (CHROMA_NOISE * (1.0 + storm * STORM_GRAIN) * gain + bandEdge * 0.35);
+    C += blotch * (CHROMA_NOISE * (1.0 + storm * STORM_GRAIN) * grainGain + bandEdge * 0.35);
     // Cross-colour: a horizontal luma slope near the subcarrier's frequency
     // is demodulated as colour. The subcarrier turns a quarter cycle a
     // pixel here and, as NTSC's does, a quarter cycle back a line of the
@@ -1444,17 +1630,17 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     // Luma noise: fine grain, sparse snow that widens to a streak, the
     // torn bright tracking band, and snow at the head switch, both grey,
-    // all seeded by the field. The grain and the blotches are lifted by
-    // the same gain the picture is: the noise is the sensor's, ahead of the
-    // amplifier, and lifting the one without the other is what a shader
-    // does and a camera does not. The band and the head switch are the
-    // deck's, downstream of all of it, and are left alone.
+    // all seeded by the field. The grain and the blotches come up with the
+    // camera's gain, by the share of it at AGC_GRAIN: a picture that is
+    // lifted without its noise is what a shader does and a camera does not.
+    // The band and the head switch are the deck's, downstream of the whole
+    // camera, and are left alone.
     float grain = cheap21(floor(fragCoord / 2.5) + fseed);
     float snowGate = 0.93 - storm * STORM_SNOW;
     float snow = step(snowGate, cheap21(lumaCell + fseed + 3.0))
         - step(snowGate, cheap21(lumaCell + fseed.yx + 5.0));
-    Y += (grain - 0.5) * LUMA_GRAIN * (1.0 + storm * STORM_GRAIN) * gain
-        + snow * (LUMA_SNOW * (1.0 + storm * STORM_GRAIN) * gain + band * 0.55);
+    Y += (grain - 0.5) * LUMA_GRAIN * (1.0 + storm * STORM_GRAIN) * grainGain
+        + snow * (LUMA_SNOW * (1.0 + storm * STORM_GRAIN) * grainGain + band * 0.55);
     float bandNoise = cheap21(vec2(floor(screenY * 240.0), fseed.y));
     Y = mix(Y, 0.7 + 0.3 * bandNoise, band * 0.8);
     float headSnow = cheap21(floor(fragCoord) + fseed.yx);
