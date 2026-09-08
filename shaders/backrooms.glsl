@@ -37,6 +37,9 @@ const float PILLAR = 0.19;         // half width of a corner pillar
 const float WALL_HALF = 0.06;      // half thickness of a partition wall
 const float WALL_DENSITY = 0.42;   // fraction of edges that carry a wall
 const float DECAL_CHANCE = 0.15;   // fraction of wall segments with something on them
+const float SINK_CHANCE = 0.08;    // fraction of them that have sunk into the floor
+const float SINK_TOP_MIN = 1.85;   // metres a sunk wall's top reaches: above EYE, so
+const float SINK_TOP_MAX = 2.20;   // its top face is never in shot and is never drawn
 const float LIGHT_DENSITY = 0.72;  // fraction of cells with a working tube
 const int MAX_CELLS = 24;          // DDA steps before a ray gives up in fog: 96 m,
                                    // where the fog leaves under 0.1 % of the scene
@@ -703,6 +706,23 @@ float hitPillars(vec3 ro, vec3 rd, vec2 cell, out vec3 normal) {
     return best;
 }
 
+// How high the wall on `owner`'s `axisX` edge goes. Almost all of them go
+// to the ceiling; SINK_CHANCE of them stop short, as though the floor had
+// come up around them, and the dark gap over the top is the only thing in
+// the place that says the building has a shape at all.
+//
+// The range is above EYE on purpose. A wall whose top is below the eye
+// would show its top face, and a slab has no top: drawing one means a
+// third box test in the hit, on every wall of every cell of the walk, for
+// something that is meant to be seen a couple of times a lap. Keep the top
+// over the eye and the face is all there ever is to draw.
+float wallTop(vec2 owner, bool axisX) {
+    vec2 c = mod(owner, SUPER);
+    float h = cheap21(vec2(c.x * 2.0 + (axisX ? 1.0 : 0.0), c.y) + vec2(0.0, 48.0));
+    if (h > SINK_CHANCE) return CEILING;
+    return SINK_TOP_MIN + (SINK_TOP_MAX - SINK_TOP_MIN) * (h / SINK_CHANCE);
+}
+
 // Nearest hit of the ray with the partition walls on the two edges of
 // `cell` the ray is heading for, as slabs WALL_HALF thick with their ends
 // exposed, or 1e9. `inv` is 1 / rd.xz and `step` is sign(rd.xz). The
@@ -734,6 +754,15 @@ float hitWalls(vec3 ro, vec3 rd, vec2 cell, vec2 inv, vec2 step, out vec3 normal
         float enter = max(enterA, enterL);
         float exit = min(max(a0, a1), max(l0, l1));
         if (enter < exit && enter > 0.0 && enter < best) {
+            // Over a sunk wall's top the ray carries on into the next cell,
+            // and that is what a sunk wall costs: cells the DDA would not
+            // otherwise have walked, on the one axis where the frame is
+            // spent. SINK_CHANCE stays small for that reason and no other.
+            // The test is the height at the entry alone, which is exact
+            // here: the eye is below SINK_TOP_MIN, so a ray that entered
+            // the slab above the top was going up and stays above it, and
+            // one going down cannot have entered above the eye.
+            if (ro.y + rd.y * enter > wallTop(owner, axisX)) continue;
             best = enter;
             // The face or an end: whichever axis the ray entered the box on.
             bool onFace = enterA > enterL;
@@ -848,6 +877,10 @@ vec2 tubeCentre(vec2 cell) {
 // The line of sight is tested against the first wall it would cross, one
 // of the four edges of p's own cell, which is exact for the four cells
 // beside it; a tube on the diagonal is tested against that crossing only.
+// A wall that has sunk (wallTop) shadows as though it had not. The tubes
+// hang level with the ceiling, so what the gap over it would let past is a
+// sliver of a tube in a room that has its own, and reading the height back
+// here would cost a hash on each of the nine cells this runs for.
 // Nothing here loops or diverges: a walk over the boundaries, however
 // short, cost a third of the frame, and each tube costs about a
 // twentieth, which is why the ring two cells out is not lit at all.
