@@ -202,6 +202,42 @@ const vec4 OFF_PACE[7] = vec4[7](
     vec4(FREEZE_AT + FREEZE, HURRY2_LEN, HURRY2_ON, HURRY)
 );
 
+// The lights going out. Once a lap the mains drop: every tube in the place
+// goes out inside a few fields, and what is left on the tape is whatever
+// the camcorder's gain can make of a room with no light in it.
+//
+// Coming back is not the shape going out was. A fluorescent tube's ballast
+// preheats the cathodes before it strikes, and no two ballasts take the
+// same time over it, so the room does not come back - it comes back a tube
+// at a time over TUBE_WARM, each one guttering for a moment as it catches.
+// A whole ceiling coming on together is a light bulb, not a fluorescent.
+//
+// The outage is on lap time and not on a hash of the absolute clock, unlike
+// every other fault here. A dark that falls at a moment the camera happens
+// to be facing a wall is a dark nobody sees; on lap time it falls where the
+// walk is looking down a straight, once a lap, every lap.
+const float OUTAGE_LEAD = 1.2;     // seconds the dark comes before the stop
+const float OUTAGE_LEN = 7.5;      // seconds the mains are down
+const float OUTAGE_FALL = 0.06;    // and how long they take to go: four fields
+const float TUBE_WARM = 3.0;       // seconds the tubes' preheat is spread over
+const float TUBE_STRIKE = 0.45;    // seconds one tube takes to strike and settle
+const float OUTAGE_AT = FREEZE_AT - OUTAGE_LEAD;
+const float OUTAGE_BACK = OUTAGE_AT + OUTAGE_LEN;
+// After this every tube is up again and the whole of it can be skipped.
+const float OUTAGE_OVER = OUTAGE_BACK + TUBE_WARM + TUBE_STRIKE + 0.7;
+
+// The camcorder's automatic gain. A camera that has lost its light winds
+// the video up until there is a picture again, which on a camcorder of this
+// age means grain: the gain lifts the sensor's noise with the signal, so a
+// dark room is not a dark picture but a loud one. The loop is slow and it
+// is deaf for a moment first, so the gain is one move up and one move back
+// down and nothing in between - a gain that hunts is a strobe, and the note
+// at the tape's colour says why there is none of that here.
+const float AGC_GAIN = 2.2;        // times the video, at the top of the gain
+const float AGC_LAG = 0.4;         // seconds the loop takes to notice the dark
+const float AGC_ON = 0.9;          // and to wind the gain up
+const float AGC_OFF = 0.6;         // it comes back down quicker than it went up
+
 // The camera is held by a person, and a person's head is steadier than the
 // hand-held shake that shaders reach for. Everything below is chosen so
 // that watching for an hour is not like being on a boat:
@@ -827,6 +863,46 @@ bool hasTube(vec2 cell) {
     return !inBlackout(cell) && tubeHash(cell) <= LIGHT_DENSITY;
 }
 
+// How much light the room has at lap-time u, from the mains: 1 with them
+// up, 0 with them down, and the ramp back is the tubes returning one at a
+// time. Not what any one tube is doing - what the camera's gain follows.
+float mainsAt(float u) {
+    return 1.0 - bump(u, OUTAGE_AT, OUTAGE_AT + OUTAGE_FALL,
+                      OUTAGE_BACK, OUTAGE_BACK + TUBE_WARM);
+}
+
+// How far the camera's gain is wound up at lap-time u, from 0 to 1. It
+// follows the room rather than leading it, and it lets go of the gain
+// sooner than it took it: see AGC_GAIN.
+float agcAt(float u) {
+    return bump(u, OUTAGE_AT + AGC_LAG, OUTAGE_AT + AGC_LAG + AGC_ON,
+                OUTAGE_BACK, OUTAGE_BACK + AGC_OFF);
+}
+
+// How much of the mains one tube has at lap-time u, given its own hash: 1
+// normally, 0 through the outage, and back over its ballast's preheat.
+//
+// The lap-time test in front of it is the whole reason the outage is free.
+// It is a branch on a value that is the same for every pixel of the frame
+// and every cell of the nine this is asked about, so no thread ever takes a
+// different path from the one beside it, and on the nineteen twentieths of
+// the lap where the lights are simply on it is a compare.
+//
+// The guttering is two sawtooths beaten together rather than a hash of the
+// time. This runs for nine cells a pixel, and the note at cheap21 has the
+// arithmetic: a sin() hash here would cost more than everything else the
+// outage does put together.
+float tubeMains(float u, float h) {
+    if (u < OUTAGE_AT || u > OUTAGE_OVER) return 1.0;
+    // The preheat, off the tube's own hash but not off its quality: the
+    // tubes that come back first should not be the ones that stutter.
+    float back = OUTAGE_BACK + TUBE_WARM * fract(h * 7.3);
+    float lit = smoothstep(back, back + TUBE_STRIKE, u);
+    float gutter = step(0.30, fract(u * 11.0 + h * 53.0) * fract(u * 7.0 + h * 131.0) * 3.0);
+    lit = mix(lit * gutter, lit, smoothstep(back + TUBE_STRIKE, back + TUBE_STRIKE + 0.6, u));
+    return mix(1.0, lit, smoothstep(OUTAGE_AT, OUTAGE_AT + OUTAGE_FALL, u));
+}
+
 // Brightness of the tube in `cell` at scene time t: 0 for a cell without
 // one, 1 for a good tube, and on the tubes that have gone bad, a fit now
 // and then: under a second of irregular stutter, then steady again. Fits
@@ -838,8 +914,10 @@ float tubeLevel(vec2 cell, float t) {
     if (inBlackout(cell)) return 0.0;
     float h = tubeHash(cell);
     if (h > LIGHT_DENSITY) return 0.0;
+    float power = tubeMains(mod(t, LAP), h);
+    if (power == 0.0) return 0.0;
     float bad = h / LIGHT_DENSITY;
-    if (bad > 0.22) return 1.0;
+    if (bad > 0.22) return power;
     vec2 c = mod(cell, SUPER);
     float tt = t + bad * 100.0;  // so the bad tubes' slots are out of step
     float slot = floor(tt / FIT_SLOT);
@@ -849,7 +927,7 @@ float tubeLevel(vec2 cell, float t) {
     float within = tt - slot * FIT_SLOT;
     float fit = step(start, within) * step(within, start + FIT_LENGTH);
     float drop = step(0.55, hash11(floor(tt * 16.0) + seed));
-    return mix(1.0, 0.3, fit * drop);
+    return power * mix(1.0, 0.3, fit * drop);
 }
 
 vec2 tubeCentre(vec2 cell) {
@@ -978,11 +1056,17 @@ vec3 surface(vec3 p, int id, vec3 n, float t, float footprint, out vec3 emission
         float panel = step(abs(local.x), 0.6) * step(abs(local.y), 0.3);
         float level = hasTube(cell) ? 1.0 : 0.0;
         float lit = tubeLevel(cell, t);
+        // A tube with no mains is not a dim tube: it is a panel with nothing
+        // behind it, so it goes back to being the dead panel's grey and
+        // stops emitting altogether. `on` is 1 for anything a tube that has
+        // its mains ever does - a fit dips to 0.3 - and leaves 1 only while
+        // the mains are away, so a fit looks exactly as it did.
+        float on = min(lit / 0.3, 1.0);
         vec3 albedo = CEILING_COLOR * (0.9 + 0.2 * noise(p.xz * 6.0)) * (1.0 - GROUT_DARK * seam);
         // A dead panel is a dark grey box, a live one is where the light is.
-        albedo = mix(albedo, vec3(0.25), panel * (1.0 - level));
-        emission = TUBE_COLOR * panel * level * (0.6 + 1.4 * lit);
-        return mix(albedo, vec3(0.0), panel * level);
+        albedo = mix(albedo, vec3(0.25), panel * (1.0 - level * on));
+        emission = TUBE_COLOR * panel * level * (0.6 * on + 1.4 * lit);
+        return mix(albedo, vec3(0.0), panel * level * on);
     }
     // Wallpaper on walls and pillars: faint vertical stripes, a darker band
     // near the floor, and blotches where it has been rubbed and stained.
@@ -1234,7 +1318,12 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // decides. See STORM_LEAD.
     float storm = stormAt(mod(now, LAP));
     float tNow = droppedFrames(now, storm);  // a dropped frame holds both fields
+    float lapNow = mod(tNow, LAP);           // where the walk has got to
     vec2 fseed = floor(vec2(hash11(fieldNo + 0.31), hash11(fieldNo + 0.77)) * 100.0);
+    // What the camera is doing about the light it has, on the tape's clock
+    // rather than the scene's: the gain is the camera's, so a dropped frame
+    // holds it along with everything else. See AGC_GAIN.
+    float gain = 1.0 + AGC_GAIN * agcAt(lapNow);
 
     // Tape faults that displace whole scan lines are applied here, to the
     // ray, so the picture really shifts rather than a copy of it.
@@ -1294,6 +1383,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     col = vec3(col.r + dcol.r * fringe, col.g, col.b - dcol.b * fringe);
     col = max(col, 0.0);
 
+    // The gain, before the gamma, because it is what it says it is: the
+    // video amplified. What the room has left is amplified with it and so
+    // is the grain below, which is the whole look of it - the far end of a
+    // dark corridor comes up out of the noise and a lit room in it burns
+    // out, because the exposure is set for the dark and nothing else.
+    col *= gain;
+
     // The camcorder's white balance is wrong: it warms everything, lifts the
     // blacks, and cannot resolve much contrast.
     col = pow(col, vec3(0.85));
@@ -1331,7 +1427,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // the band and worst at its edges.
     vec2 blotch = noise2(chromaAt + fseed) * 2.0 - 1.0;
     C *= 1.0 - band * 0.85;
-    C += blotch * (CHROMA_NOISE * (1.0 + storm * STORM_GRAIN) + bandEdge * 0.35);
+    C += blotch * (CHROMA_NOISE * (1.0 + storm * STORM_GRAIN) * gain + bandEdge * 0.35);
     // Cross-colour: a horizontal luma slope near the subcarrier's frequency
     // is demodulated as colour. The subcarrier turns a quarter cycle a
     // pixel here and, as NTSC's does, a quarter cycle back a line of the
@@ -1348,13 +1444,17 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
     // Luma noise: fine grain, sparse snow that widens to a streak, the
     // torn bright tracking band, and snow at the head switch, both grey,
-    // all seeded by the field.
+    // all seeded by the field. The grain and the blotches are lifted by
+    // the same gain the picture is: the noise is the sensor's, ahead of the
+    // amplifier, and lifting the one without the other is what a shader
+    // does and a camera does not. The band and the head switch are the
+    // deck's, downstream of all of it, and are left alone.
     float grain = cheap21(floor(fragCoord / 2.5) + fseed);
     float snowGate = 0.93 - storm * STORM_SNOW;
     float snow = step(snowGate, cheap21(lumaCell + fseed + 3.0))
         - step(snowGate, cheap21(lumaCell + fseed.yx + 5.0));
-    Y += (grain - 0.5) * LUMA_GRAIN * (1.0 + storm * STORM_GRAIN)
-        + snow * (LUMA_SNOW * (1.0 + storm * STORM_GRAIN) + band * 0.55);
+    Y += (grain - 0.5) * LUMA_GRAIN * (1.0 + storm * STORM_GRAIN) * gain
+        + snow * (LUMA_SNOW * (1.0 + storm * STORM_GRAIN) * gain + band * 0.55);
     float bandNoise = cheap21(vec2(floor(screenY * 240.0), fseed.y));
     Y = mix(Y, 0.7 + 0.3 * bandNoise, band * 0.8);
     float headSnow = cheap21(floor(fragCoord) + fseed.yx);
