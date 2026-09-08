@@ -36,6 +36,7 @@ const float EYE = 1.60;            // camera height: the eye of someone 170 cm
 const float PILLAR = 0.19;         // half width of a corner pillar
 const float WALL_HALF = 0.06;      // half thickness of a partition wall
 const float WALL_DENSITY = 0.42;   // fraction of edges that carry a wall
+const float DECAL_CHANCE = 0.15;   // fraction of wall segments with something on them
 const float LIGHT_DENSITY = 0.72;  // fraction of cells with a working tube
 const int MAX_CELLS = 24;          // DDA steps before a ray gives up in fog: 96 m,
                                    // where the fog leaves under 0.1 % of the scene
@@ -345,6 +346,9 @@ const vec3 CARPET_COLOR = vec3(0.42, 0.35, 0.17);
 const vec3 CEILING_COLOR = vec3(0.70, 0.66, 0.50);
 const vec3 TUBE_COLOR = vec3(1.00, 0.98, 0.82);
 const vec3 FOG_COLOR = vec3(0.09, 0.075, 0.03);
+const vec3 DOOR_COLOR = vec3(0.26, 0.17, 0.09);   // varnished wood, going dark
+const vec3 KNOB_COLOR = vec3(0.52, 0.44, 0.24);   // brass, tarnished
+const vec3 HOLE_COLOR = vec3(0.05, 0.045, 0.03);  // what is behind a wall: not much
 
 // The walk, in cells. Consecutive entries differ by one step along an axis,
 // the last is the first moved one tile north, and OPEN_SIDES is derived
@@ -895,6 +899,136 @@ float noise(vec2 p) {
     );
 }
 
+// --- the things on the walls ----------------------------------------------
+//
+// Now and then a wall carries something built by someone who had been told
+// what a door is and had never seen one: a door too small and up by the
+// ceiling, a door with nine handles, a vent that goes nowhere, a corridor
+// painted on the wall in one-point perspective. Every part of each of them
+// is right and the assembly is not, which is a different fright from an
+// empty yellow room and the one the film's version of this place trades in.
+//
+// They are decals rather than geometry, and that is the whole of why they
+// are affordable: the frame goes on the DDA's cell walk, and a function of
+// where on the wall the ray landed adds no cells to it. DECAL_CHANCE keeps
+// them rare, because the walk is meant to be dull and an anomaly is an
+// event; something on every segment is only wallpaper again.
+//
+// Both faces of a wall get the same decal. The hash is on the cell that
+// owns the edge, the way wallOn indexes it, so a door reads as a door
+// through the wall rather than as a picture stuck to one side of it.
+
+// A rectangle's inside, 1 within `rad` of the origin and 0 outside.
+float boxMask(vec2 q, vec2 rad) {
+    vec2 d = abs(q) - rad;
+    return step(max(d.x, d.y), 0.0);
+}
+
+// The nested rectangles of the painted corridor, drawn without a loop: in
+// the frame's own coordinates the picture is self-similar, so `e` (1 at the
+// frame, 0 at the vanishing point) has a ring wherever log(e) / log(RING)
+// passes a whole number. RING is how much each rectangle shrinks by, and
+// the count is a cutoff on that index rather than a loop bound.
+const float RING = 0.58;
+const float RINGS = 4.5;
+
+// The decal on the wall segment `owner` owns on its `axisX` edge, over the
+// plain paper in `base`. `along` is metres from the segment's near corner
+// and `v` is the height off the floor.
+vec3 wallDecal(vec2 owner, bool axisX, float along, float v, vec3 base) {
+    // Its own corner of the hash lattice, clear of the walls' and the
+    // tubes'. Walls repeat every SUPER cells, so what is on them does too.
+    vec2 c = mod(owner, SUPER);
+    vec2 key = vec2(c.x * 2.0 + (axisX ? 1.0 : 0.0), c.y);
+    float h = cheap21(key + vec2(0.0, 96.0));
+    if (h > DECAL_CHANCE) return base;
+    // Which of the four it is comes out of what is left of the same hash.
+    // The sizes and the number of handles want more bits than that leaves,
+    // and take a second hash: it is drawn only where there is something to
+    // draw, so it costs nothing on the segments that carry nothing.
+    int kind = int(h / DECAL_CHANCE * 4.0);
+    float g = cheap21(key + vec2(0.0, 112.0));
+
+    // Half of an edge can be wall and half of it open (wallOn's kinds 2 and
+    // 3), and a door hung over the opening would be a door hung on nothing.
+    // The decal is centred on the half that is there.
+    int part = wallOn(owner, axisX);
+    float cx = part == 2 ? CELL * 0.25 : (part == 3 ? CELL * 0.75 : CELL * 0.5);
+
+    if (kind == 0) {
+        // The small door, up where the wall meets the ceiling. Half a metre
+        // to two thirds of one, and its top hard against the ceiling, so
+        // there is no reading it as a hatch at the top of a stair: it is a
+        // door, at the height of a door's lintel and the size of nothing.
+        vec2 rad = vec2(0.15 + 0.05 * g, 0.25 + 0.10 * fract(g * 37.0));
+        vec2 q = vec2(along - cx, v - (CEILING - 0.1 - rad.y));
+        float panel = boxMask(q, rad);
+        float frame = boxMask(q, rad + 0.045) - panel;
+        float knob = step(length(q - vec2(rad.x * 0.6, 0.0)), 0.025) * panel;
+        vec3 col = mix(base, DOOR_COLOR, panel);
+        col = mix(col, DOOR_COLOR * 0.45, frame);
+        return mix(col, KNOB_COLOR, knob);
+    }
+    if (kind == 1) {
+        // A door of the ordinary size with five to nine handles on it, in a
+        // single file down the shutting stile or in a block of them out in
+        // the middle. The lattice is drawn by rounding to the nearest of its
+        // points and clamping the index, so the count costs no loop: past
+        // the last handle the clamp measures the distance to the last
+        // handle, and there is no next one.
+        vec2 rad = vec2(0.45, 1.0);
+        vec2 q = vec2(along - cx, v - rad.y);
+        float panel = boxMask(q, rad);
+        float frame = boxMask(q, rad + 0.05) - panel;
+        bool block = fract(g * 149.0) < 0.5;
+        vec2 count = block ? vec2(3.0, 2.0 + floor(fract(g * 37.0) * 2.0))
+                           : vec2(1.0, 5.0 + floor(fract(g * 37.0) * 5.0));
+        vec2 pitch = vec2(0.26, 0.18);
+        vec2 at = vec2(block ? 0.0 : 0.26, 0.0);  // about where one handle would be
+        vec2 lim = (count - 1.0) * 0.5;
+        vec2 gi = clamp(round((q - at) / pitch), -lim, lim);
+        float knob = step(length(q - at - gi * pitch), 0.033) * panel;
+        vec3 col = mix(base, DOOR_COLOR, panel);
+        col = mix(col, DOOR_COLOR * 0.45, frame);
+        return mix(col, KNOB_COLOR, knob);
+    }
+    if (kind == 2) {
+        // A vent, at the height of one, with slats across it and no duct
+        // behind them. Half a metre square: the size is right for a return
+        // air grille and there is nothing in this building it could serve.
+        float rad = 0.25;
+        vec2 q = vec2(along - cx, v - (1.15 + 0.25 * g));
+        float hole = boxMask(q, vec2(rad));
+        float rim = boxMask(q, vec2(rad + 0.035)) - hole;
+        float slat = step(0.45, fract((q.y + rad) * 9.0));
+        vec3 col = mix(base, mix(HOLE_COLOR * 0.3, HOLE_COLOR, slat), hole);
+        return mix(col, base * 0.5, rim);
+    }
+    // The corridor painted on the wall: a doorway's worth of rectangle with
+    // the four corners drawn to a vanishing point in the middle of it, the
+    // rectangles nested in toward the same point, and the far end dark.
+    //
+    // The point is that the point does not move. Real perspective is a
+    // function of where the eye is; this one is fixed to the wall, so the
+    // longer the camera walks past it the further the picture's vanishing
+    // point is from where the eye says it should be, and the thing goes on
+    // being wrong without ever doing anything. It is paint, so it is a
+    // function of the wall's own coordinates and nothing else.
+    vec2 rad = vec2(0.45, 1.0);
+    vec2 q = vec2(along - cx, v - rad.y);
+    if (boxMask(q, rad) < 0.5) return base;
+    vec2 e2 = abs(q) / rad;
+    float e = max(max(e2.x, e2.y), 1e-3);
+    float k = log(e) / log(RING);
+    float ring = (1.0 - smoothstep(0.05, 0.12, abs(fract(k + 0.5) - 0.5))) * step(k, RINGS);
+    // The lines to the corners thin toward the point as a drawn line would:
+    // the threshold is on the offset from the diagonal over `e`, so the
+    // width goes with the distance from the frame.
+    float diag = 1.0 - smoothstep(0.02, 0.06, abs(e2.x - e2.y) / e);
+    vec3 col = mix(HOLE_COLOR, WALL_COLOR * 0.55, e);
+    return mix(col, col * 0.35, max(ring, diag));
+}
+
 // Albedo and emission of the surface hit at p.
 vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
     emission = vec3(0.0);
@@ -927,7 +1061,20 @@ vec3 surface(vec3 p, int id, vec3 n, float t, out vec3 emission) {
     float grime = noise(vec2(u * 1.7, p.y * 1.3) + 11.0);
     float skirting = 1.0 - 0.35 * smoothstep(0.12, 0.09, p.y);
     float top = 1.0 - 0.15 * smoothstep(CEILING - 0.3, CEILING, p.y);
-    return WALL_COLOR * (0.92 + 0.08 * stripe) * (0.8 + 0.35 * grime) * skirting * top;
+    vec3 paper = WALL_COLOR * (0.92 + 0.08 * stripe) * (0.8 + 0.35 * grime) * skirting * top;
+    if (id != 2) return paper;  // a pillar is not a wall segment: nothing hangs on it
+
+    // Which wall segment this is, from the hit alone: the boundary line the
+    // wall stands on, the cell along it, and the axis. The wall's exposed
+    // end is normal to the other axis and lies on the line itself or half a
+    // cell from it, never the WALL_HALF off it that a face is, so the test
+    // tells a face from an end without knowing which of them was hit.
+    float across = abs(n.x) > 0.5 ? p.x : p.z;
+    float line = round(across / CELL);
+    if (abs(abs(across - line * CELL) - WALL_HALF) > WALL_HALF * 0.5) return paper;
+    float seg = floor(u / CELL);
+    vec2 owner = abs(n.x) > 0.5 ? vec2(line - 1.0, seg) : vec2(seg, line - 1.0);
+    return wallDecal(owner, abs(n.x) > 0.5, u - seg * CELL, p.y, paper);
 }
 
 // --- the tape -------------------------------------------------------------
