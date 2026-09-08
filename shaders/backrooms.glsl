@@ -295,6 +295,32 @@ const float WRONG_TILT = 0.10;     // metres one shoulder stands above the other
 const float WRONG_ELBOW = 0.19;    // metres the elbow is the wrong side of the arm
 const float WRONG_HOVER = 0.12;    // metres of air under both feet
 
+// The zoom. Somebody who cannot make out what is at the end of a corridor
+// does the one thing a camcorder gives them, and the rocker under the thumb
+// drives a motor rather than a ring: the rate builds over a moment, holds,
+// and the servo runs a few percent past where it was let go of and settles
+// back. It is only ever done at the stop. A long lens multiplies every
+// angle the hand puts in, and everything at BOB is about not being on a
+// boat; zooming while walking would undo the lot of it.
+//
+// Two and a half times and not the eight the lens has. The figure is an
+// eighth of the frame high to start with, so eight times is a figure
+// standing over the viewer, which is a different film - and four is already
+// half the frame. A third of the frame is the size at which a proportion
+// can be read and the thing is still at the end of a corridor.
+//
+// There is no autofocus hunting, which is the other thing a camcorder does
+// in the dark and would be the obvious thing to draw here. Blurring the
+// picture means sampling it more than once, and the trace is the frame's
+// whole budget; a fake blur that samples the same ray is not a defocus, it
+// is a glow.
+const float ZOOM = 2.5;            // times, at the long end
+const float ZOOM_AT = FREEZE_AT + 0.4;  // lap second the thumb goes on: after the stop
+const float ZOOM_ON = 2.2;         // seconds the motor takes to get there
+const float ZOOM_OFF = 1.3;        // and to come back off, once the lights do
+const float ZOOM_OVER = 0.05;      // of the throw the servo runs past the end
+const float TELE_SHAKE = 0.0018;   // radians the hand wanders by, at the long end
+
 // The camera is held by a person, and a person's head is steadier than the
 // hand-held shake that shaders reach for. Everything below is chosen so
 // that watching for an hour is not like being on a boat:
@@ -1427,6 +1453,17 @@ Pose cameraPose(float t) {
     return Pose(ro, forward, right, up, roll, kick, vel, yawRate, rollRate, kickRate);
 }
 
+// How far the lens is zoomed in at lap-time u: 1 at the wide end, ZOOM at
+// the long one. The push is one smoothstep, which is a rate that builds and
+// falls the way a motor loaded against a stop does, with the overshoot laid
+// on top of its end; the pull back begins the moment the mains do. See ZOOM.
+float zoomAt(float u) {
+    float on = bump(u, ZOOM_AT, ZOOM_AT + ZOOM_ON, OUTAGE_BACK, OUTAGE_BACK + ZOOM_OFF);
+    float over = ZOOM_OVER * bump(u, ZOOM_AT + ZOOM_ON * 0.75, ZOOM_AT + ZOOM_ON,
+                                  ZOOM_AT + ZOOM_ON + 0.12, ZOOM_AT + ZOOM_ON + 0.4);
+    return 1.0 + (ZOOM - 1.0) * (on + over);
+}
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // Screen coordinates: y up, height 1, and the frame's aspect. fragCoord
     // grows downward here and in Ghostty alike, so it is flipped once, here.
@@ -1486,9 +1523,14 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float wobble = WOBBLE * sin(screenY * 37.0 + now * 21.0) * timeBaseError(now, storm);
     uv.x += bandShift + headShift + wobble;
 
-    // The lens: barrel distortion, then a wide field of view.
+    // The lens: barrel distortion, then a wide field of view - except where
+    // it is not wide. The barrel comes off with the zoom, near enough as one
+    // over it: the bend is the wide converter's, and a converter is a wide
+    // end thing. A long lens draws its straight lines straight.
+    float zoom = zoomAt(lapNow);
+    float focal = FOCAL * zoom;
     float r2 = dot(uv, uv);
-    uv *= 1.0 + BARREL * r2;
+    uv *= 1.0 + BARREL * r2 / zoom;
 
     // --- the camera --------------------------------------------------------
     // Once, at the newer field's time; the older field's lines are moved
@@ -1498,8 +1540,27 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec3 ro = cam.ro + cam.vel * back;
     vec2 ruv = vec2(uv.x * cos(cam.roll) - uv.y * sin(cam.roll), uv.x * sin(cam.roll) + uv.y * cos(cam.roll));
     ruv += cam.rollRate * back * vec2(-ruv.y, ruv.x);
-    ruv.y += FOCAL * (cam.kick + cam.kickRate * back);
-    vec3 rd = normalize(cam.forward * FOCAL + cam.right * ruv.x + cam.up * ruv.y);
+    ruv.y += focal * (cam.kick + cam.kickRate * back);
+    // The hand, which is only ever visible through a long lens. Standing
+    // perfectly still is a tripod and not a person, but the gait is gone by
+    // now (`moving` is zero and takes the bob with it), so what is left to
+    // draw is the hand itself: a twentieth of a degree, wandering at a few
+    // hertz, in proportion to how far the lens is in. It is the same
+    // fractional noise the gait's wander uses, at rates well clear of the
+    // 0.1-0.4 Hz the note at BOB is about, and it is a function of the
+    // field's time alone, so the compiler lifts it out of the pixel the way
+    // it lifts cameraPose.
+    //
+    // It is not in the comb. The older lines are moved back along the
+    // camera's rates, and neither this nor the zoom's own rate of change is
+    // one of them: at the stop the yaw rate is zero and the eye is still, so
+    // there is nothing for a field of lag to shear, and the zoom moves the
+    // picture by less in a field than the shake does.
+    if (zoom > 1.0) {
+        float hand = TELE_SHAKE * (zoom - 1.0) / (ZOOM - 1.0);
+        ruv += focal * hand * vec2(fbm1(tNow * 2.7), fbm1(tNow * 3.3 + 41.0));
+    }
+    vec3 rd = normalize(cam.forward * focal + cam.right * ruv.x + cam.up * ruv.y);
     // Turned back about the vertical, to first order: the angle is under a
     // hundredth of a radian, and the length it adds is nothing the trace
     // notices.
@@ -1550,7 +1611,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
             // not a staircase. Taken from the geometry and not from fwidth:
             // a derivative inside a branch that only some of the quad takes
             // is a derivative of nothing.
-            float aa = tHit / (FOCAL * frame.y);
+            float aa = tHit / (focal * frame.y);
             float cover = shows * smoothstep(aa, -aa, figureDist(local, wrong));
             if (cover > 0.0) {
                 // Lit like anything else standing there, which at this
