@@ -48,7 +48,18 @@ private func parseSize(_ text: String) -> (width: Int, height: Int)? {
 /// ```
 ///
 /// `GHOSTTY_SAVER_TIME_SPAN` moves the seconds of `iTime` the samples are
-/// spread over. The numbers are comparable with each other - one branch
+/// spread over, and `GHOSTTY_SAVER_TIME_FROM` moves where they start. A
+/// shader with one expensive thing in a long cycle - `backrooms` puts a
+/// blackout and a figure into eleven seconds of its hundred and fifty -
+/// averages that thing away over the whole cycle, and what a change to it
+/// costs is only visible with the samples put on top of it:
+///
+/// ```sh
+/// GHOSTTY_SAVER_TIME=backrooms GHOSTTY_SAVER_TIME_FROM=120 \
+///   GHOSTTY_SAVER_TIME_SPAN=20 swift test
+/// ```
+///
+/// The numbers are comparable with each other - one branch
 /// against another on the same machine, which is what a change to a shader
 /// needs - and not with the window's, which include the compositor and are
 /// roughly half as fast again. Read the p95 rather than the mean: a shader
@@ -64,6 +75,7 @@ struct FrameCostTests {
         let environment = ProcessInfo.processInfo.environment
         let size = environment["GHOSTTY_SAVER_TIME_SIZE"].flatMap(parseSize) ?? defaultSize
         let span = environment["GHOSTTY_SAVER_TIME_SPAN"].flatMap(Double.init) ?? defaultSpan
+        let from = environment["GHOSTTY_SAVER_TIME_FROM"].flatMap(Double.init) ?? 0
         let names =
             asked == "all"
             ? GeneratedShaders.all.map(\.name)
@@ -73,7 +85,10 @@ struct FrameCostTests {
         defer { shmExclusive.unlock() }
         prepareShmTracking()
 
-        print("frame cost: \(size.width) x \(size.height), \(timedFrames) frames over \(span) s")
+        print(
+            "frame cost: \(size.width) x \(size.height), \(timedFrames) frames"
+                + " over \(span) s from \(from) s"
+        )
         print("| shader | mean | p50 | p95 | min |")
         print("| --- | ---: | ---: | ---: | ---: |")
         for name in names {
@@ -81,7 +96,9 @@ struct FrameCostTests {
                 GeneratedShaders.all.first { $0.name == name },
                 "no shader named \(name)"
             )
-            let milliseconds = try time(program, width: size.width, height: size.height, span: span)
+            let milliseconds = try time(
+                program, width: size.width, height: size.height, from: from, span: span
+            )
             let mean = milliseconds.reduce(0, +) / Double(milliseconds.count)
             let sorted = milliseconds.sorted()
             let p95 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
@@ -101,7 +118,7 @@ struct FrameCostTests {
     /// would time the allocator as much as the GPU, and `render` waits for the
     /// command buffer, so the wall clock across it is the frame.
     private func time(
-        _ program: ShaderProgram, width: Int, height: Int, span: Double
+        _ program: ShaderProgram, width: Int, height: Int, from: Double, span: Double
     ) throws -> [Double] {
         let renderer = try MetalRenderer(
             width: width,
@@ -124,7 +141,7 @@ struct FrameCostTests {
         var milliseconds: [Double] = []
         let total = warmUpFrames + timedFrames
         for index in 0..<total {
-            let at = Float(span) * Float(index) / Float(total)
+            let at = Float(from) + Float(span) * Float(index) / Float(total)
             state.update(time: at, frame: index, frameRate: 60, date: Date())
             let start = Date()
             try renderer.render(into: frame, uniforms: state.uniforms)
