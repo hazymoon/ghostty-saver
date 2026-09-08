@@ -954,14 +954,6 @@ bool hasTube(vec2 cell) {
     return !inBlackout(cell) && tubeHash(cell) <= LIGHT_DENSITY;
 }
 
-// How much light the room has at lap-time u, from the mains: 1 with them
-// up, 0 with them down, and the ramp back is the tubes returning one at a
-// time. Not what any one tube is doing - what the camera's gain follows.
-float mainsAt(float u) {
-    return 1.0 - bump(u, OUTAGE_AT, OUTAGE_AT + OUTAGE_FALL,
-                      OUTAGE_BACK, OUTAGE_BACK + TUBE_WARM);
-}
-
 // How far the camera's gain is wound up at lap-time u, from 0 to 1. It
 // follows the room rather than leading it, and it lets go of the gain
 // sooner than it took it: see AGC_GAIN.
@@ -970,21 +962,15 @@ float agcAt(float u) {
                 OUTAGE_BACK, OUTAGE_BACK + AGC_OFF);
 }
 
-// How much of the mains one tube has at lap-time u, given its own hash: 1
-// normally, 0 through the outage, and back over its ballast's preheat.
-//
-// The lap-time test in front of it is the whole reason the outage is free.
-// It is a branch on a value that is the same for every pixel of the frame
-// and every cell of the nine this is asked about, so no thread ever takes a
-// different path from the one beside it, and on the nineteen twentieths of
-// the lap where the lights are simply on it is a compare.
+// How much of the mains one tube has at lap-time u, given its own hash: 0
+// through the outage, and back over its ballast's preheat. Only ever called
+// inside the outage's own seconds; see the note at its caller.
 //
 // The guttering is two sawtooths beaten together rather than a hash of the
 // time. This runs for nine cells a pixel, and the note at cheap21 has the
 // arithmetic: a sin() hash here would cost more than everything else the
 // outage does put together.
 float tubeMains(float u, float h) {
-    if (u < OUTAGE_AT || u > OUTAGE_OVER) return 1.0;
     // The preheat, off the tube's own hash but not off its quality: the
     // tubes that come back first should not be the ones that stutter.
     float back = OUTAGE_BACK + TUBE_WARM * fract(h * 7.3);
@@ -1005,14 +991,25 @@ float tubeLevel(vec2 cell, float t) {
     if (inBlackout(cell)) return 0.0;
     float h = tubeHash(cell);
     if (h > LIGHT_DENSITY) return 0.0;
-    // One cell in the tile keeps its mains. Nothing about the building says
+    // The mains, on the seconds of the lap where they are anything but on.
+    // The whole of the outage sits behind one test on lap time, which is the
+    // same value for every pixel of the frame and every one of the nine
+    // cells this is asked about: no thread ever takes a different path from
+    // the one beside it, and the nineteen twentieths of the lap where the
+    // lights are simply on pay a compare. Measured, with the cell test
+    // outside this branch where it looks free: half a millisecond a frame
+    // for the whole lap, to answer a question about eleven seconds of it.
+    //
+    // One cell of the tile keeps its mains. Nothing about the building says
     // why - it is the cell with something standing in it, and a thing that
     // is only there while the lights are out has to be somewhere they are
-    // not. Written as a max rather than a branch: tubeMains is a compare
-    // outside the outage, and this runs for nine cells a pixel.
-    float kept = float(all(equal(mod(cell, SUPER), FIGURE_CELL)));
-    float power = max(kept, tubeMains(mod(t, LAP), h));
-    if (power == 0.0) return 0.0;
+    // not. See FIGURE_CELL.
+    float u = mod(t, LAP);
+    float power = 1.0;
+    if (u > OUTAGE_AT && u < OUTAGE_OVER) {
+        power = all(equal(mod(cell, SUPER), FIGURE_CELL)) ? 1.0 : tubeMains(u, h);
+        if (power == 0.0) return 0.0;
+    }
     float bad = h / LIGHT_DENSITY;
     if (bad > 0.22) return power;
     vec2 c = mod(cell, SUPER);
