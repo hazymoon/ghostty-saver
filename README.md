@@ -75,7 +75,8 @@ ghostty-saver [options]
   --dump PATH       with --verify, also write the frame to PATH as a PNG.
                     with --frames, PATH is a directory and the frames are
                     written to it as a numbered sequence, 1/--fps apart
-  --at SECONDS      with --dump, the iTime of the first frame (default 0)
+  --at SECONDS      the iTime of the first frame (default 0), in the terminal
+                    as well as with --dump: start the shader partway in
   --date VALUE      pin iDate: an ISO 8601 instant (2026-08-28T21:30:00Z) or
                     seconds since local midnight. Default: the wall clock
   --stats           print a per-frame breakdown on exit
@@ -310,6 +311,10 @@ end of its 22 seconds, and `starwars` takes a couple of minutes to run the
 crawl through. `--date` is the same thing for the calendar: `iDate` carries
 the real wall clock, so a shader that reads it needs `--date 2026-08-28T21:30:00Z`
 (or `--date 77400`, seconds since midnight) before two dumps can be compared.
+
+`--at` works in a terminal too, for watching a stretch that a still cannot
+show: `--shader backrooms --at 120 --seconds 20` runs lap seconds 120 to 140
+and stops. `--seconds` counts from launch, not from `--at`.
 The test suite pins it the same way.
 
 To see a whole cycle at once rather than one frame at a time:
