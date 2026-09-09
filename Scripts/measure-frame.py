@@ -15,6 +15,12 @@ of the picture):
   taken out, which leaves the steps and bands and drops the slow fall-off of
   a wall receding into fog. This is the number for the lighting's cell-boundary
   steps.
+- `floor_hp`: the bottom third's column means after the same running mean
+  is taken out, over the third's mean - the floor's equivalent of `wall_hp`,
+  for the cells of light and dark the carpet showed across the picture.
+- `floor_p10`: the bottom third's tenth-percentile luma over its median -
+  how dark the darkest floor in view is against the ordinary floor. A floor
+  with unlit cells on it is well under a half; an even one is near one.
 - `box_x` and `box_y`: in the bottom third, the mean chroma difference across
   the boundaries of the tape's colour cells (CHROMA_SAMPLES across, half of
   LINES down) over the mean difference everywhere else. Blotches with hard
@@ -119,6 +125,31 @@ def wall_bands(y, w: int, h: int) -> tuple[float, float]:
     return cv, std(hp) / m
 
 
+def floor_bands(y, w: int, h: int) -> tuple[float, float]:
+    third = h // 3
+    cols = [0.0] * w
+    rows = y[2 * third * w:3 * third * w]
+    for row in range(third):
+        base = row * w
+        for col in range(w):
+            cols[col] += rows[base + col]
+    n = float(third)
+    cols = [c / n for c in cols]
+    m = mean(cols)
+    if m == 0.0:
+        return 0.0, 0.0
+    half = max(1, w // 32)
+    hp = []
+    for col in range(w):
+        lo = max(0, col - half)
+        hi = min(w, col + half + 1)
+        hp.append(cols[col] - mean(cols[lo:hi]))
+    ordered = sorted(rows)
+    median = ordered[len(ordered) // 2]
+    p10 = ordered[len(ordered) // 10]
+    return std(hp) / m, (p10 / median if median else 0.0)
+
+
 def box_edges(i, w: int, h: int) -> tuple[float, float]:
     third = h // 3
     rows = range(2 * third, 3 * third)
@@ -166,15 +197,18 @@ def measure(path: str) -> dict:
     w, h = box[2], box[3]
     top, mid, bot = thirds(y, w, h)
     cv, hp = wall_bands(y, w, h)
+    fhp, fp10 = floor_bands(y, w, h)
     bx, by = box_edges(i, w, h)
     return {
         "file": path, "size": f"{width}x{height}",
         "Y": mean(y), "Y_top": top, "Y_mid": mid, "Y_bot": bot,
-        "wall_cv": cv, "wall_hp": hp, "box_x": bx, "box_y": by,
+        "wall_cv": cv, "wall_hp": hp, "floor_hp": fhp, "floor_p10": fp10,
+        "box_x": bx, "box_y": by,
     }
 
 
-COLUMNS = ["file", "size", "Y", "Y_top", "Y_mid", "Y_bot", "wall_cv", "wall_hp", "box_x", "box_y"]
+COLUMNS = ["file", "size", "Y", "Y_top", "Y_mid", "Y_bot", "wall_cv", "wall_hp",
+           "floor_hp", "floor_p10", "box_x", "box_y"]
 
 
 def fmt(key: str, value) -> str:
