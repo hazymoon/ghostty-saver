@@ -40,11 +40,12 @@ const float LIGHT_DENSITY = 0.72;  // fraction of cells with a working tube
 const float LIGHT_REACH = 6.0;     // metres a tube's light is gone by: 1.5 cells,
                                    // the nearest a tube two cells out ever is
 const float REACH2 = LIGHT_REACH * LIGHT_REACH;
-const float LIGHT_DIRECT = 2.9;    // a tube's light on a surface facing it
+const float LIGHT_DIRECT = 2.4;    // a tube's light on a surface facing it
 const float DIRECT_FALL = 0.2;     // and how fast that falls with the square of the distance
-const float LIGHT_BOUNCE = 1.0;    // and off everything else, facing or not
+const float LIGHT_BOUNCE = 0.85;    // and off everything else, facing or not
 const float BOUNCE_FALL = 0.3;     // likewise
 const float LIGHT_AMBIENT = 0.025; // what is there with no tube in reach
+const float LIGHT_FILL = 0.5;      // off the lit ceiling as a whole, onto whatever faces up
 const int MAX_CELLS = 24;          // DDA steps before a ray gives up in fog: 96 m,
                                    // where the fog leaves under 0.1 % of the scene
 
@@ -439,9 +440,11 @@ vec2 cheap22(vec2 p) {
 // The dark corner: cells x in [5, 8) and z in [3, 6) of every tile have no
 // working light. The walk runs up its west edge, x = 4, and the first pause
 // is there, looking in.
+const vec2 BLACKOUT_LO = vec2(5.0, 3.0);
+const vec2 BLACKOUT_SIZE = vec2(3.0, 3.0);
 bool inBlackout(vec2 cell) {
-    vec2 c = mod(cell, SUPER);
-    return c.x >= 5.0 && c.y >= 3.0 && c.y < 6.0;
+    vec2 c = mod(cell, SUPER) - BLACKOUT_LO;
+    return c.x >= 0.0 && c.y >= 0.0 && c.y < BLACKOUT_SIZE.y;
 }
 
 // --- the walk -------------------------------------------------------------
@@ -856,15 +859,43 @@ vec2 tubeCentre(vec2 cell) {
     return (cell + 0.5) * CELL;
 }
 
+// Light off the lit ceiling as a whole. With every tube working the floor
+// under the nine-tube sum is even to a few percent, but a fifth of the
+// cells have no tube, and a run of them leaves a patch of floor that no
+// tube reaches at all, lit by LIGHT_AMBIENT and nothing else: on the walk
+// the carpet went from a cell of light to a cell of near black and back,
+// and the blocks were the plainest thing on the floor. In an office that
+// dark never happens, because the whole ceiling is a light: every lit
+// panel and every tile beside it throws light down onto the floor, from
+// well beyond the nine cells this shader sums. That share is what this is,
+// and it is the same everywhere for the same reason the tubes' window is
+// zero at LIGHT_REACH - a sum over more cells would step at their
+// boundaries, and a constant cannot. It arrives from above, so a surface
+// gets it by how much of the ceiling it faces: the floor all of it, a wall
+// half, the ceiling none, which keeps it off the ceiling, the first thing
+// LIGHT_AMBIENT lights when it is raised instead. In the blackout there is
+// no lit ceiling to come from, so it fades out over the last cell before
+// the dark and is gone inside; the dark still begins at the doorway.
+float ceilingFill(vec3 p, vec3 n) {
+    float tile = SUPER * CELL;
+    vec2 centre = (BLACKOUT_LO + BLACKOUT_SIZE * 0.5) * CELL;
+    vec2 half_ = BLACKOUT_SIZE * 0.5 * CELL;
+    vec2 d = mod(p.xz - centre + tile * 0.5, tile) - tile * 0.5;
+    float outside = length(max(abs(d) - half_, 0.0));
+    float hemisphere = 0.5 + 0.5 * n.y;
+    return LIGHT_FILL * hemisphere * smoothstep(0.0, CELL, outside);
+}
+
 // Light arriving at p with normal n from the tubes in the surrounding cells:
 // direct light from the tubes of p's own cell and the eight around it that
 // have a clear line to p across the walls, and a share that bounced off
 // everything else, which is what keeps the ceiling from going black when
 // the tubes hang level with it, and what light the walls' shadows have.
-// The shares (LIGHT_DIRECT, LIGHT_BOUNCE, LIGHT_AMBIENT) are set so the
-// picture averages what it did with a steeper, unwindowed fall-off, with
-// less of it under each tube and more of it everywhere: a lit office is
-// even, and the walk is meant to feel like it goes on. The blackout, which
+// The shares (LIGHT_DIRECT, LIGHT_BOUNCE, LIGHT_AMBIENT, and LIGHT_FILL in
+// ceilingFill) are set so the picture averages what it did with a steeper,
+// unwindowed fall-off and no fill, with less of it under each tube and more
+// of it everywhere: a lit office is even, and the walk is meant to feel
+// like it goes on. The blackout, which
 // no tube reaches, has LIGHT_AMBIENT and nothing else, and its edge is
 // where the last working tube's reach ends rather than a slow fall-off
 // from tubes two rooms away, so the dark begins sooner and deeper than it
@@ -1277,7 +1308,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // stretched by how obliquely it hit.
     float footprint = dist / (frame.y * FOCAL) / max(abs(dot(n, rd)), 0.05);
     vec3 albedo = surface(p, id, n, tNow, footprint, emission);
-    vec3 col = albedo * (lighting(p, n, tNow) + vec3(LIGHT_AMBIENT)) + emission;
+    vec3 col = albedo * (lighting(p, n, tNow) + ceilingFill(p, n) * TUBE_COLOR + vec3(LIGHT_AMBIENT)) + emission;
     float fog = exp(-dist * 0.075);
     col = mix(FOG_COLOR, col, fog);
 
