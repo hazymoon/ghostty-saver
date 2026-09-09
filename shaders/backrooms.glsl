@@ -214,9 +214,18 @@ const vec4 OFF_PACE[7] = vec4[7](
     vec4(FREEZE_AT + FREEZE, HURRY2_LEN, HURRY2_ON, HURRY)
 );
 
-// The lights going out. Once a lap the mains drop: every tube in the place
-// goes out inside a few fields, and what is left on the tape is whatever
-// the camcorder's gain can make of a room with no light in it.
+// The lights going out. Once a lap the mains drop, and what is left on the
+// tape is whatever the camcorder's gain can make of a room with no light
+// in it.
+//
+// They do not all go at once. A whole ceiling cutting to black in four
+// fields reads as a cut - the picture that was there is replaced by
+// another one, and a watcher who saw a cut sees a new scene, not the same
+// room with its lights off. So each tube's mains go at its own moment
+// inside OUTAGE_SPREAD, and its phosphor holds a dull glow for a fraction
+// of a second after, the way a fluorescent does: for half a second the
+// room is a room going dark, with its tubes still on the ceiling as dim
+// marks, and only then is it dark.
 //
 // Coming back is not the shape going out was. A fluorescent tube's ballast
 // preheats the cathodes before it strikes, and no two ballasts take the
@@ -228,9 +237,13 @@ const vec4 OFF_PACE[7] = vec4[7](
 // every other fault here. A dark that falls at a moment the camera happens
 // to be facing a wall is a dark nobody sees; on lap time it falls where the
 // walk is looking down a straight, once a lap, every lap.
-const float OUTAGE_LEAD = 1.2;     // seconds the dark comes before the stop
+const float OUTAGE_LEAD = 2.0;     // seconds the dark comes before the stop:
+                                   // long enough to walk a step or two in it
 const float OUTAGE_LEN = 7.5;      // seconds the mains are down
-const float OUTAGE_FALL = 0.06;    // and how long they take to go: four fields
+const float OUTAGE_SPREAD = 0.5;   // seconds the tubes' going out is spread over
+const float OUTAGE_FALL = 0.06;    // and how long one takes to go: four fields
+const float AFTERGLOW = 0.12;      // of its light a tube's phosphor keeps at first
+const float AFTERGLOW_LEN = 0.7;   // and how long that takes to fade
 const float TUBE_WARM = 3.0;       // seconds the tubes' preheat is spread over
 const float TUBE_STRIKE = 0.45;    // seconds one tube takes to strike and settle
 const float OUTAGE_AT = FREEZE_AT - OUTAGE_LEAD;
@@ -246,7 +259,7 @@ const float OUTAGE_OVER = OUTAGE_BACK + TUBE_WARM + TUBE_STRIKE + 0.7;
 // down and nothing in between - a gain that hunts is a strobe, and the note
 // at the tape's colour says why there is none of that here.
 const float AGC_GAIN = 2.0;        // times the video, at the top of the gain
-const float AGC_LAG = 0.4;         // seconds the loop takes to notice the dark
+const float AGC_LAG = 0.15;        // seconds the loop takes to notice the dark
 const float AGC_ON = 0.9;          // and to wind the gain up
 const float AGC_OFF = 0.6;         // it comes back down quicker than it went up
 // The share of the gain that reaches the noise. Not all of it: what is
@@ -273,26 +286,36 @@ const float AGC_GRAIN = 0.35;
 // about seven luma samples across, which is a dark vertical mark standing
 // in a lit doorway: a person. That it is not a person is a matter of
 // proportion, and proportion is not legible until the camera has zoomed.
+//
+// Even zoomed it must not resolve. A silhouette with a clean edge and two
+// arms is a drawing of a person, and the eye reads it as one and is done;
+// what a tape holds of a dark shape at that range is a smear a few lines
+// tall that will not hold still. So the outline is drawn FIGURE_SOFT
+// pixels wide rather than one, each scan line takes it a little to one
+// side or the other (FIGURE_SMEAR), and each line has only some of it
+// (FIGURE_FRAY), all three on the field's hash so it churns at field rate
+// with the grain around it.
 const vec2 FIGURE_CELL = vec2(3.0, 6.0);   // cells, in the tile the walk repeats in
 const float FIGURE_OFF = 1.1;      // metres it stands off the room's centre line
 const float FIGURE_TALL = 1.75;    // metres, which is how tall people are
 const float FIGURE_IN = 0.4;       // seconds it takes to come out of the noise
 const float FIGURE_GONE = 0.15;    // and to be gone, under the first tube
 const vec3 FIGURE_COLOR = vec3(0.02);  // near enough a hole in the picture
+const float FIGURE_SOFT = 4.0;     // pixels the edge is spread over
+const float FIGURE_SMEAR = 5.0;    // pixels a scan line can take it sideways
+const float FIGURE_FRAY = 0.6;     // how much of it a scan line can drop
 
-// What is wrong with it. A figure wrong in six ways at once is a monster,
+// What is wrong with it. A figure wrong in every way at once is a monster,
 // and a monster is a thing the eye finishes reading and puts down; one that
 // is wrong in a single way is a person the eye keeps going back to and
-// cannot settle. So a hash of the lap number picks one of the six, and on
+// cannot settle. So a hash of the lap number picks one of the three, and on
 // about half the laps a second one, and everything else about it is exactly
 // a person. Over an evening a watcher sees several of them and never the
-// same one twice running, which is also why none of the six is the one the
-// figure is known by.
+// same one twice running, which is also why none of the three is the one
+// the figure is known by. The three are the ones a smear can carry: the
+// figure has no arms to hang wrong, since arms are what made it a drawing.
 const float WRONG_TALL = 0.35;     // times taller: 2.4 m, the head near the ceiling
-const float WRONG_ARM = 0.45;      // metres one hand hangs below where hands stop
 const float WRONG_NECK = 0.16;     // metres of neck there is no room for
-const float WRONG_TILT = 0.10;     // metres one shoulder stands above the other
-const float WRONG_ELBOW = 0.19;    // metres the elbow is the wrong side of the arm
 const float WRONG_HOVER = 0.12;    // metres of air under both feet
 
 // The zoom. Somebody who cannot make out what is at the end of a corridor
@@ -977,7 +1000,13 @@ float tubeMains(float u, float h) {
     float lit = smoothstep(back, back + TUBE_STRIKE, u);
     float gutter = step(0.30, fract(u * 11.0 + h * 53.0) * fract(u * 7.0 + h * 131.0) * 3.0);
     lit = mix(lit * gutter, lit, smoothstep(back + TUBE_STRIKE, back + TUBE_STRIKE + 0.6, u));
-    return mix(1.0, lit, smoothstep(OUTAGE_AT, OUTAGE_AT + OUTAGE_FALL, u));
+    // Going out, at the tube's own moment within OUTAGE_SPREAD, and then the
+    // afterglow: a line down from AFTERGLOW to nothing over AFTERGLOW_LEN,
+    // which reaches zero exactly, so the caller's early return still fires
+    // once it has faded.
+    float gone = OUTAGE_AT + OUTAGE_SPREAD * fract(h * 3.7);
+    float glow = AFTERGLOW * max(1.0 - (u - gone - OUTAGE_FALL) / AFTERGLOW_LEN, 0.0);
+    return mix(1.0, max(lit, glow), smoothstep(gone, gone + OUTAGE_FALL, u));
 }
 
 // Brightness of the tube in `cell` at scene time t: 0 for a cell without
@@ -1180,10 +1209,7 @@ vec3 surface(vec3 p, int id, vec3 n, float t, float footprint, out vec3 emission
 // and the note at cheap21 has what a sin() hash costs when it is.
 struct Wrong {
     float tall;    // too tall for the room
-    float arm;     // one arm hanging past the knee
     float neck;    // more neck than there is room for
-    float tilt;    // shoulders that are not level
-    float elbow;   // an elbow on the wrong side of its arm
     float hover;   // both feet off the floor
 };
 
@@ -1193,11 +1219,10 @@ float picked(float i, float a, float b, float two) {
 }
 
 Wrong wrongOf(float lap) {
-    float a = floor(cheap21(vec2(lap, 3.0)) * 6.0);
-    float b = floor(cheap21(vec2(lap, 17.0)) * 6.0);
+    float a = floor(cheap21(vec2(lap, 3.0)) * 3.0);
+    float b = floor(cheap21(vec2(lap, 17.0)) * 3.0);
     float two = step(0.5, cheap21(vec2(lap, 29.0)));
-    return Wrong(picked(0.0, a, b, two), picked(1.0, a, b, two), picked(2.0, a, b, two),
-                 picked(3.0, a, b, two), picked(4.0, a, b, two), picked(5.0, a, b, two));
+    return Wrong(picked(0.0, a, b, two), picked(1.0, a, b, two), picked(2.0, a, b, two));
 }
 
 // Distance from p to the segment ab, in the plane.
@@ -1208,33 +1233,22 @@ float segment(vec2 p, vec2 a, vec2 b) {
 }
 
 // The figure's outline as a distance in metres on its billboard, where p is
-// (across, up) in metres from the piece of floor it stands on. Nine strokes
-// - two legs, a torso, a neck, a head, and two arms with an elbow each - as
-// capsules, which is all a person is at eighteen metres through a tape.
-// Written in the proportions of a FIGURE_TALL body and scaled at the end,
-// so the height deviation is one divide and does not move anything else.
+// (across, up) in metres from the piece of floor it stands on. Five strokes
+// - two legs, a torso, a neck and a head - as capsules, which is all a
+// person is at eighteen metres through a tape; arms would be more than
+// that, see FIGURE_SOFT. Written in the proportions of a FIGURE_TALL body
+// and scaled at the end, so the height deviation is one divide and does
+// not move anything else.
 float figureDist(vec2 p, Wrong w) {
     p.y -= WRONG_HOVER * w.hover;
     float scale = 1.0 + WRONG_TALL * w.tall;
     p /= scale;
-    float lift = WRONG_TILT * w.tilt;
-    vec2 shoulderL = vec2(-0.19, 1.42 + lift);
-    vec2 shoulderR = vec2(0.19, 1.42);
     float d = segment(p, vec2(-0.10, 0.92), vec2(-0.11, 0.0)) - 0.075;
     d = min(d, segment(p, vec2(0.10, 0.92), vec2(0.11, 0.0)) - 0.075);
-    d = min(d, segment(p, vec2(0.0, 0.94), vec2(0.0, 1.40)) - 0.15);
+    d = min(d, segment(p, vec2(0.0, 0.94), vec2(0.0, 1.40)) - 0.17);
     float neckTop = 1.50 + WRONG_NECK * w.neck;
     d = min(d, segment(p, vec2(0.0, 1.40), vec2(0.0, neckTop)) - 0.05);
     d = min(d, length(p - vec2(0.0, neckTop + 0.105)) - 0.105);
-    // The right arm is the one that hangs; the left is the one whose elbow
-    // is wrong, so that a lap which draws both still draws two arms.
-    vec2 elbowR = vec2(0.235, 1.10 - 0.20 * w.arm);
-    vec2 handR = vec2(0.215, 0.80 - WRONG_ARM * w.arm);
-    vec2 elbowL = vec2(-0.235 + WRONG_ELBOW * w.elbow, 1.10);
-    d = min(d, segment(p, shoulderR, elbowR) - 0.05);
-    d = min(d, segment(p, elbowR, handR) - 0.05);
-    d = min(d, segment(p, shoulderL, elbowL) - 0.05);
-    d = min(d, segment(p, elbowL, vec2(-0.215, 0.80)) - 0.05);
     return d * scale;
 }
 
@@ -1602,14 +1616,21 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         vec3 hit = ro + rd * tHit;
         vec2 local = vec2(dot(hit - foot, across), hit.y);
         float scale = 1.0 + WRONG_TALL * wrong.tall;
-        if (tHit > 0.0 && tHit < dist && abs(local.x) < 0.4 * scale
+        // A pixel's worth of world at that distance. Taken from the
+        // geometry and not from fwidth: a derivative inside a branch that
+        // only some of the quad takes is a derivative of nothing.
+        float px = tHit / (focal * frame.y);
+        if (tHit > 0.0 && tHit < dist && abs(local.x) < 0.4 * scale + FIGURE_SMEAR * px
                 && local.y > -0.1 && local.y < FIGURE_TALL * scale + WRONG_HOVER + 0.1) {
-            // A pixel's worth of world at that distance, so the outline is
-            // not a staircase. Taken from the geometry and not from fwidth:
-            // a derivative inside a branch that only some of the quad takes
-            // is a derivative of nothing.
-            float aa = tHit / (focal * frame.y);
+            // The tape's hold on it: see FIGURE_SOFT. The smear and the fray
+            // are on the line and the field, so they are the same for every
+            // pixel of a line and different on the next, which is what a
+            // tape does to an edge it cannot resolve.
+            float tear = cheap21(vec2(line, fseed.x));
+            local.x += FIGURE_SMEAR * px * (tear - 0.5);
+            float aa = FIGURE_SOFT * px;
             float cover = shows * smoothstep(aa, -aa, figureDist(local, wrong));
+            cover *= 1.0 - FIGURE_FRAY * cheap21(vec2(line, fseed.y));
             if (cover > 0.0) {
                 // Lit like anything else standing there, which at this
                 // albedo means barely: what is on the tape is the lit wall
