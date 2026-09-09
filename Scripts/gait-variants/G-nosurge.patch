@@ -1,0 +1,13 @@
+diff --git i/shaders/backrooms.glsl w/shaders/backrooms.glsl
+index cf32f90..1078cb1 100644
+--- i/shaders/backrooms.glsl
++++ w/shaders/backrooms.glsl
+@@ -327,7 +327,7 @@ const float IMPACT_TAU = 0.07;     // seconds it takes to die away (about 4 fiel
+ const float IMPACT_HZ = 9.0;       // and how fast it rings
+ const float KICK = 0.0017;         // radians of pitch the strike knocks in, uncountered
+ const float KICK_TAU = 0.08;
+-const float RIPPLE = 0.05;         // fraction the pace surges by at each strike
++const float RIPPLE = 0.0;          // fraction the pace surges by at each strike
+ const float JITTER = 0.22;         // steps of slow phase wander in the gait
+ const float ASYM = 0.03;           // one leg's bob over the other's
+ const float STEP_JITTER = 0.06;    // random size of each step's bob
