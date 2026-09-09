@@ -23,7 +23,7 @@ struct Options {
     var listShaders = false
     var verify = false
     var dumpPath: String?
-    var dumpTime: Double = 0
+    var startTime: Double = 0
     var pinnedDate: Date?
     var stats = false
 }
@@ -49,7 +49,8 @@ usage: ghostty-saver [options]
   --dump PATH       with --verify, also write the frame to PATH as a PNG.
                     with --frames, PATH is a directory and the frames are
                     written to it as a numbered sequence, 1/--fps apart
-  --at SECONDS      with --dump, the iTime of the first frame (default 0)
+  --at SECONDS      the iTime of the first frame (default 0), in the terminal
+                    as well as with --dump: start the shader partway in
   --date VALUE      pin iDate: an ISO 8601 instant (2026-08-28T21:30:00Z) or
                     seconds since local midnight. Default: the wall clock
   --stats           print a per-frame breakdown on exit
@@ -129,7 +130,7 @@ func parseOptions(defaults: SaverConfig) -> Options {
             options.dumpPath = nextValue(argument)
             options.verify = true
         case "--at":
-            options.dumpTime = Double(nextValue(argument)) ?? 0
+            options.startTime = Double(nextValue(argument)) ?? 0
         case "--date":
             let value = nextValue(argument)
             guard let date = PinnedDate.parse(value) else {
@@ -347,7 +348,7 @@ if options.verify {
         width: size.width,
         height: size.height,
         dumpPath: options.dumpPath,
-        time: options.dumpTime,
+        time: options.startTime,
         date: options.pinnedDate,
         frames: options.maxFrames,
         fps: options.targetFPS
@@ -443,7 +444,10 @@ while !stopped {
 
     let renderStart = monotonicNow()
     state.update(
-        time: Float(frameStart - startedAt),
+        // --at shifts iTime, not the clock: --seconds and the pacer still
+        // count from launch, so a run started at 120 s and stopped after 20
+        // shows 120 to 140.
+        time: Float(frameStart - startedAt + options.startTime),
         frame: Int(frameIndex),
         frameRate: Float(options.targetFPS),
         date: options.pinnedDate ?? Date()
