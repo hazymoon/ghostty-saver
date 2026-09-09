@@ -361,8 +361,10 @@ Scripts/measure-frame.py before.png after.png
 
 It reports the mean luma of the 4:3 picture and of its top, middle and bottom
 thirds, how much the middle third's brightness steps across the picture once
-the slow fall-off into fog is taken out, and how much sharper the colour is
-across the tape's colour-cell boundaries than anywhere else. The numbers are
+the slow fall-off into fog is taken out, the same for the bottom third and
+how dark its darkest floor is against the ordinary floor, and how much
+sharper the colour is across the tape's colour-cell boundaries than anywhere
+else. The numbers are
 relative - the same `iTime` and size before and after - and they are what
 holds an edit to "the ceiling is softer and nothing else moved" rather than
 "it looks about the same".
